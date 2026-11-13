@@ -14,7 +14,7 @@ var SHEETS = {
   Calls: ['id', 'created', 'table', 'type', 'done', 'doneAt'],
   Settings: ['key', 'value']
 };
-var ADMIN_ACTIONS_WRITE = { setStatus: 1, payTable: 1, resolveCall: 1, saveMenuItem: 1, deleteMenuItem: 1, setAvailable: 1, saveSettings: 1, uploadImage: 1 };
+var ADMIN_ACTIONS_WRITE = { me: 1, getSettings: 1, rotateTableTokens: 1, setStatus: 1, payTable: 1, resolveCall: 1, saveMenuItem: 1, deleteMenuItem: 1, setAvailable: 1, saveSettings: 1, uploadImage: 1 };
 
 /* ---------------- web entry ---------------- */
 function doGet() { return json_({ ok: true, service: 'QR Order API' }); }
