@@ -44,10 +44,12 @@
   }
   function pickTable() {
     $('#tbadge').textContent = '';
-    var h = '<div class="card" style="padding:16px"><h2 class="vh">กรุณาเลือกโต๊ะของคุณ</h2><p class="muted" style="margin-top:0">ปกติจะเลือกให้อัตโนมัติเมื่อสแกน QR ที่โต๊ะ</p><div class="tablepick">';
-    for (var i = 1; i <= S.settings.tables; i++) h += '<button onclick="location.search=\'?t=' + i + '\'">' + i + '</button>';
-    $('#menuList').innerHTML = h + '</div></div>';
+    // No valid table QR: ask to scan again (a manual table picker would bypass the per-table secret).
+    $('#menuList').innerHTML = '<div class="card center" style="padding:24px 16px"><div class="done-ic" style="background:var(--primary-50);color:var(--primary)">' + icon('qr', 36) + '</div>' +
+      '<h2 class="vh">กรุณาสแกน QR Code ที่โต๊ะ</h2><p class="muted">ลิงก์นี้ไม่ถูกต้องหรือ QR ถูกเปลี่ยนแล้ว — สแกน QR ที่ตั้งอยู่บนโต๊ะอีกครั้ง หรือแจ้งพนักงาน</p></div>';
+    $('#cats').innerHTML = ''; $('#cartbar').classList.add('hidden');
     $('.bottom-nav').classList.add('hidden');
+    S.badTable = true;
   }
   function groups() {
     var order = String(S.settings.categories || '').split(',').map(function (c) { return c.trim(); }).filter(Boolean), g = {};
@@ -152,7 +154,9 @@
   /* ---------- my orders ---------- */
   function refreshOrders() {
     if (!table || !S.settings) return;
-    return api('tableOrders', { table: table, k: tkey }).then(function (d) { S.orders = d; renderOrders(); }).catch(function () {});
+    if (S.badTable) return;
+    return api('tableOrders', { table: table, k: tkey }).then(function (d) { S.orders = d; renderOrders(); })
+      .catch(function (e) { if (e.code === 'BAD_TABLE') pickTable(); });
   }
   function renderOrders() {
     var d = S.orders; if (!d) return;
