@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR Order — หลังร้าน</title>
+<meta name="theme-color" content="#DC2626">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<div id="demoBar" class="demo-bar hidden">โหมดทดลอง — ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น (ยังไม่ได้เชื่อม Google Sheets)</div>
+
+<!-- Login -->
+<section id="login" class="login hidden">
+  <div class="login-card card">
+    <div class="logo-badge"><span id="loginIcon"></span></div>
+    <h1>QR Order</h1>
+    <p class="muted">ระบบสั่งอาหารผ่าน QR Code — หลังร้าน</p>
+    <div id="gsiBtn" class="gsi"></div>
+    <button id="demoLogin" class="btn primary block hidden">เข้าสู่ระบบ (โหมดทดลอง)</button>
+    <p id="loginErr" class="login-err hidden" role="alert"></p>
+    <p class="small muted">เข้าสู่ระบบด้วยบัญชี Gmail ที่ได้รับสิทธิ์เป็นเจ้าของร้าน/พนักงานเท่านั้น</p>
+  </div>
+</section>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-ic" id="brandIcon"></span>
+      <div><div class="brand-name" id="shopName">ร้านของฉัน</div><div class="brand-sub">QR Order</div></div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="หัวข้อหลัก">
+      <button class="tab active" role="tab" data-tab="overview" aria-selected="true"><span data-ic="chart"></span> ภาพรวม</button>
+      <button class="tab" role="tab" data-tab="menu" aria-selected="false"><span data-ic="menu"></span> เมนู</button>
+    </nav>
+    <div class="top-actions">
+      <button class="btn sm" id="btnQr" title="QR Code โต๊ะ"><span data-ic="qr"></span><span class="hide-sm">QR โต๊ะ</span></button>
+      <button class="btn sm icon-btn" id="btnSettings" aria-label="ตั้งค่าร้าน" title="ตั้งค่าร้าน"><span data-ic="gear"></span></button>
+      <button class="btn sm icon-btn" id="btnLogout" aria-label="ออกจากระบบ" title="ออกจากระบบ"><span data-ic="logout"></span></button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- ภาพรวม -->
+    <section id="tab-overview" role="tabpanel">
+      <div class="sec-head">
+        <div>
+          <h2>ออเดอร์ตอนนี้</h2>
+          <p class="muted small" id="liveMeta">กำลังโหลด…</p>
+        </div>
+        <div class="row-gap">
+          <span class="badge" id="acceptBadge"></span>
+          <button class="btn sm" id="btnSound" aria-pressed="true"></button>
+        </div>
+      </div>
+      <div id="calls" class="calls"></div>
+      <div class="board">
+        <div class="col"><div class="col-head"><span class="dot new"></span>ออเดอร์ใหม่ <span class="count" id="cNew">0</span></div><div class="col-body" id="colNew"></div></div>
+        <div class="col"><div class="col-head"><span class="dot cooking"></span>กำลังทำ <span class="count" id="cCooking">0</span></div><div class="col-body" id="colCooking"></div></div>
+        <div class="col"><div class="col-head"><span class="dot served"></span>เสิร์ฟแล้ว · รอชำระ <span class="count" id="cServed">0</span></div><div class="col-body" id="colServed"></div></div>
+      </div>
+
+      <div class="sec-head mt">
+        <div><h2>สรุปยอดขาย</h2><p class="muted small" id="rangeLabel"></p></div>
+        <div class="ranges" role="group" aria-label="ช่วงเวลา">
+          <button class="chip active" data-range="today">วันนี้</button>
+          <button class="chip" data-range="yesterday">เมื่อวาน</button>
+          <button class="chip" data-range="7">7 วัน</button>
+          <button class="chip" data-range="30">30 วัน</button>
+          <button class="chip" data-range="month">เดือนนี้</button>
+          <label class="chip date-chip"><span class="sr-only">ตั้งแต่</span><input type="date" id="dFrom"></label>
+          <label class="chip date-chip"><span class="sr-only">ถึง</span><input type="date" id="dTo"></label>
+        </div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+      <div id="insights" class="insights"></div>
+
+      <div class="grid2">
+        <div class="card panel">
+          <div class="panel-head"><h3>ช่วงเวลาที่ลูกค้าสั่งเยอะ</h3><span class="muted small">จำนวนออเดอร์รายชั่วโมง</span></div>
+          <div class="chart-box"><canvas id="chHour" aria-label="กราฟจำนวนออเดอร์รายชั่วโมง" role="img"></canvas></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>เมนูขายดี</h3>
+            <div class="seg" role="group"><button class="seg-b active" data-top="qty">ตามจำนวน</button><button class="seg-b" data-top="sales">ตามยอดเงิน</button></div>
+          </div>
+          <ol class="toplist" id="topList"></ol>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>ยอดขายรายวัน</h3><span class="muted small">บาท</span></div>
+          <div class="chart-box"><canvas id="chDay" aria-label="กราฟยอดขายรายวัน" role="img"></canvas></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>สัดส่วนตามหมวดหมู่</h3><span class="muted small">บาท</span></div>
+          <div class="chart-box"><canvas id="chCat" aria-label="กราฟสัดส่วนยอดขายตามหมวด" role="img"></canvas></div>
+        </div>
+        <div class="card panel span2">
+          <div class="panel-head"><h3>แผนที่ความหนาแน่นของออเดอร์ (วัน × ชั่วโมง)</h3><span class="muted small">สีเข้ม = ออเดอร์เยอะ</span></div>
+          <div class="heat-wrap"><div id="heat" class="heat"></div></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>ยอดขายตามโต๊ะ</h3></div>
+          <div id="tableList" class="tablelist"></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>ออเดอร์ล่าสุด</h3><span class="muted small">ย้อนหลัง 24 ชม.</span></div>
+          <div id="recent" class="recent"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- เมนู -->
+    <section id="tab-menu" role="tabpanel" class="hidden">
+      <div class="sec-head">
+        <div><h2>เมนูอาหาร</h2><p class="muted small" id="menuMeta"></p></div>
+        <button class="btn primary" id="btnAddMenu"><span data-ic="plus"></span> เพิ่มเมนู</button>
+      </div>
+      <div class="menu-tools">
+        <label class="search"><span data-ic="search"></span><span class="sr-only">ค้นหาเมนู</span><input id="menuSearch" class="input" placeholder="ค้นหาชื่อเมนู…"></label>
+        <div class="ranges" id="catFilter"></div>
+      </div>
+      <div id="menuGrid" class="menu-grid"></div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="core.js"></script>
+<script src="common.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

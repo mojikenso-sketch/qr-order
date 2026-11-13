@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>สั่งอาหาร</title>
+<meta name="theme-color" content="#DC2626">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="order.css">
+</head>
+<body>
+<div id="demoBar" class="demo-bar hidden">โหมดทดลอง — ออเดอร์จะไปที่หลังร้านในเบราว์เซอร์เครื่องนี้</div>
+<header class="ohead">
+  <div class="ohead-in">
+    <div style="min-width:0">
+      <div class="shop" id="shop">กำลังโหลด…</div>
+      <div class="sub">สั่งอาหารผ่าน QR Code</div>
+    </div>
+    <div class="tbadge" id="tbadge" aria-live="polite"></div>
+  </div>
+  <div id="notice" class="notice hidden"></div>
+  <nav class="cats" id="cats" aria-label="หมวดหมู่"></nav>
+</header>
+
+<main id="view-menu" class="omain">
+  <div id="menuList"><div class="spinner"></div></div>
+</main>
+
+<main id="view-orders" class="omain hidden">
+  <h2 class="vh">ออเดอร์ของโต๊ะนี้</h2>
+  <div id="ordersBox"></div>
+  <div class="helpers">
+    <button class="btn" data-callt="staff"><span data-ic="bell"></span>เรียกพนักงาน</button>
+    <button class="btn" data-callt="water"><span data-ic="water"></span>ขอน้ำ/น้ำแข็ง</button>
+    <button class="btn primary" id="btnBill"><span data-ic="receipt"></span>เช็คบิล</button>
+  </div>
+</main>
+
+<div class="cartbar hidden" id="cartbar">
+  <button class="btn primary block cartbtn" id="openCart">
+    <span class="cb-l"><span data-ic="cart"></span><span id="cartCount">0</span> รายการ</span>
+    <span>ดูตะกร้า</span>
+    <span class="cb-r" id="cartTotal">0 ฿</span>
+  </button>
+</div>
+
+<nav class="bottom-nav" aria-label="หน้า">
+  <button class="bn active" data-view="menu"><span data-ic="menu"></span>เมนู</button>
+  <button class="bn" data-view="orders"><span data-ic="note"></span>ออเดอร์ของฉัน<span class="bn-badge hidden" id="ordBadge"></span></button>
+  <button class="bn" data-callt="staff"><span data-ic="bell"></span>เรียกพนักงาน</button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="core.js"></script>
+<script src="common.js"></script>
+<script src="order.js"></script>
+</body>
+</html>
