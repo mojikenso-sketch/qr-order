@@ -708,6 +708,10 @@ function seedDemoData() {
   if (need > 0) s.insertRowsAfter(s.getMaxRows(), need);
   s.getRange(1, 1, s.getMaxRows(), w).setNumberFormat('@');
   s.getRange(2, 1, orders.length, w).setValues(orders.map(function (o) { return toRow_('Orders', o); }));
+  // keep today's running order number above the sample orders so real orders don't reuse a number
+  var today = QRCore.dayKey(new Date()), maxNo = 0;
+  orders.forEach(function (o) { if (QRCore.dayKey(o.created) === today && o.no > maxNo) maxNo = o.no; });
+  PropertiesService.getScriptProperties().setProperty('NO_' + today, String(maxNo));
   var store = SheetStore_();
   store.saveMenu(QRCore.demoMenu());
   var st = store.getSettings();

@@ -47,7 +47,7 @@
     // No valid table QR: ask to scan again (a manual table picker would bypass the per-table secret).
     $('#menuList').innerHTML = '<div class="card center" style="padding:24px 16px"><div class="done-ic" style="background:var(--primary-50);color:var(--primary)">' + icon('qr', 36) + '</div>' +
       '<h2 class="vh">กรุณาสแกน QR Code ที่โต๊ะ</h2><p class="muted">ลิงก์นี้ไม่ถูกต้องหรือ QR ถูกเปลี่ยนแล้ว — สแกน QR ที่ตั้งอยู่บนโต๊ะอีกครั้ง หรือแจ้งพนักงาน</p></div>';
-    $('#cats').innerHTML = ''; $('#cartbar').classList.add('hidden');
+    $('#cats').innerHTML = ''; $('#cartbar').classList.add('hidden'); $('#tbadge').classList.add('hidden');
     $('.bottom-nav').classList.add('hidden');
     S.badTable = true;
   }
