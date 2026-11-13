@@ -3,7 +3,8 @@
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var esc = QR.esc, baht = QR.baht, icon = QR.icon, api = QR.api;
-  var table = (new URLSearchParams(location.search).get('t') || '').trim();
+  var qs = new URLSearchParams(location.search);
+  var table = (qs.get('t') || '').trim(), tkey = (qs.get('k') || '').trim();
   var S = { settings: null, menu: [], cart: {}, orders: null, timer: null };
   var CART_KEY = 'qro_cart_' + table;
   var QUICK = ['ไม่เผ็ด', 'เผ็ดน้อย', 'เผ็ดมาก', 'ไม่ใส่ผัก', 'พิเศษ', 'ใส่กล่องกลับบ้าน'];
@@ -32,7 +33,7 @@
       S.settings = d.settings; S.menu = d.menu;
       $('#shop').textContent = d.settings.shopName; document.title = 'สั่งอาหาร — ' + d.settings.shopName;
       var n = parseInt(table, 10);
-      if (!n || n < 1 || n > d.settings.tables || String(n) !== table) return pickTable();
+      if (!n || n < 1 || n > d.settings.tables || String(n) !== table || !tkey) return pickTable();
       $('#tbadge').textContent = 'โต๊ะ ' + table;
       if (d.settings.notice) { $('#notice').textContent = d.settings.notice; $('#notice').classList.remove('hidden'); }
       if (!d.settings.accepting) { $('#notice').textContent = 'ขณะนี้ร้านปิดรับออเดอร์ผ่าน QR ชั่วคราว กรุณาติดต่อพนักงาน'; $('#notice').classList.remove('hidden'); }
@@ -134,7 +135,7 @@
     $('#oSend', el).addEventListener('click', function () {
       var btn = this; btn.disabled = true; btn.innerHTML = 'กำลังส่ง…';
       var items = cartLines().map(function (x) { return { id: x.m.id, qty: x.c.qty, note: x.c.note }; });
-      api('placeOrder', { table: table, items: items, note: $('#oNote', el).value, name: $('#oName', el).value }).then(function (o) {
+      api('placeOrder', { table: table, k: tkey, items: items, note: $('#oNote', el).value, name: $('#oName', el).value }).then(function (o) {
         S.cart = {}; saveCart(); md.close(); renderMenu(); renderCartBar();
         var ok = modal('ส่งออเดอร์แล้ว',
           '<div class="center"><div class="done-ic">' + icon('check', 40) + '</div><h3>ออเดอร์ #' + o.no + ' เข้าครัวแล้ว</h3><p class="muted">โต๊ะ ' + esc(o.table) + ' · ' + o.items.length + ' รายการ · ' + baht(o.total) + ' บาท</p><p class="small muted">ติดตามสถานะได้ที่ "ออเดอร์ของฉัน"</p></div>',
@@ -144,6 +145,7 @@
       }).catch(function (e) {
         btn.disabled = false; btn.innerHTML = icon('check', 18) + ' ยืนยันสั่งอาหาร'; QR.toast(e.message, 'err');
         if (e.code === 'SOLD_OUT') load();
+        if (e.code === 'BAD_TABLE') { md.close(); tkey = ''; pickTable(); }
       });
     });
   }
@@ -151,7 +153,7 @@
   /* ---------- my orders ---------- */
   function refreshOrders() {
     if (!table || !S.settings) return;
-    return api('tableOrders', { table: table }).then(function (d) { S.orders = d; renderOrders(); }).catch(function () {});
+    return api('tableOrders', { table: table, k: tkey }).then(function (d) { S.orders = d; renderOrders(); }).catch(function () {});
   }
   function renderOrders() {
     var d = S.orders; if (!d) return;
@@ -169,7 +171,7 @@
       }).join('') : '<div class="empty">ยังไม่มีออเดอร์จากโต๊ะนี้<br><button class="btn primary" style="margin-top:12px" data-view="menu">ดูเมนู</button></div>');
   }
   function call(type) {
-    api('callStaff', { table: table, type: type }).then(function (r) {
+    api('callStaff', { table: table, k: tkey, type: type }).then(function (r) {
       QR.toast(r.already ? 'แจ้งพนักงานไปแล้ว กรุณารอสักครู่' : (type === 'bill' ? 'แจ้งเช็คบิลแล้ว' : type === 'water' ? 'แจ้งขอน้ำแล้ว' : 'เรียกพนักงานแล้ว'), 'ok');
       refreshOrders();
     }).catch(function (e) { QR.toast(e.message, 'err'); });

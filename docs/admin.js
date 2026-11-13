@@ -356,14 +356,19 @@
   function showQr() {
     var n = S.settings.tables, base = orderBase(), cards = '';
     for (var i = 1; i <= n; i++) {
-      cards += '<div class="qr-card"><div class="qs">' + esc(S.settings.shopName) + '</div><div class="qt">โต๊ะ ' + i + '</div>' + QR.qrSvg(base + i, 5) +
-        '<div class="qh">สแกนเพื่อดูเมนูและสั่งอาหาร</div><a href="' + esc(base + i) + '" target="_blank" rel="noopener">' + esc(base + i) + '</a></div>';
+      var u = base + i + '&k=' + encodeURIComponent(S.settings.tableTokens[i] || '');
+      cards += '<div class="qr-card"><div class="qs">' + esc(S.settings.shopName) + '</div><div class="qt">โต๊ะ ' + i + '</div>' + QR.qrSvg(u, 5) +
+        '<div class="qh">สแกนเพื่อดูเมนูและสั่งอาหาร</div><a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(u) + '</a></div>';
     }
     var md = modal('QR Code สั่งอาหาร (' + n + ' โต๊ะ)',
       '<p class="small muted" style="margin-top:0">พิมพ์แล้วตั้งไว้ที่โต๊ะ ลูกค้าสแกนแล้วสั่งได้ทันที — เปลี่ยนจำนวนโต๊ะได้ที่ ตั้งค่าร้าน</p>' +
       (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? '<p class="small" style="color:var(--warn)">ตอนนี้เปิดจาก localhost — QR จะสแกนจากมือถือไม่ได้จนกว่าจะขึ้นเว็บ GitHub Pages</p>' : '') +
       '<div class="qr-grid">' + cards + '</div>',
-      '<a class="btn" href="' + esc(base + '1') + '" target="_blank" rel="noopener">' + icon('link', 18) + ' เปิดหน้าลูกค้า (โต๊ะ 1)</a><button class="btn primary" id="qrPrint">' + icon('print', 18) + ' พิมพ์</button>', 'wide');
+      '<button class="btn sm ghost danger" id="qrRotate" style="margin-right:auto">' + icon('refresh', 16) + ' สร้าง QR ชุดใหม่</button><a class="btn" href="' + esc(base + '1&k=' + encodeURIComponent(S.settings.tableTokens[1] || '')) + '" target="_blank" rel="noopener">' + icon('link', 18) + ' เปิดหน้าลูกค้า (โต๊ะ 1)</a><button class="btn primary" id="qrPrint">' + icon('print', 18) + ' พิมพ์</button>', 'wide');
+    $('#qrRotate', md.el).addEventListener('click', function () {
+      if (!confirm('สร้างรหัส QR ใหม่ทุกโต๊ะ? QR ที่พิมพ์ไว้เดิมจะใช้สั่งอาหารไม่ได้ ต้องพิมพ์ใหม่')) return;
+      api('rotateTableTokens').then(function (ns) { S.settings = ns; md.close(); showQr(); QR.toast('สร้าง QR ชุดใหม่แล้ว — กรุณาพิมพ์ใหม่', 'ok'); }).catch(err);
+    });
     $('#qrPrint', md.el).addEventListener('click', function () {
       var pa = $('#printArea') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'printArea' }));
       pa.innerHTML = '<div class="qr-grid">' + cards + '</div>';

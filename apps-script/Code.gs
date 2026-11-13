@@ -108,6 +108,7 @@ function toRow_(name, o) {
     var v = o[c];
     if (v === undefined || v === null) return '';
     if (typeof v === 'object') return JSON.stringify(v);
+    if (typeof v === 'string' && /^[-=+@]/.test(v) || typeof v === 'string' && (v.charCodeAt(0) === 9 || v.charCodeAt(0) === 13)) return "'" + v; // never let customer text become a formula
     return v;
   });
 }

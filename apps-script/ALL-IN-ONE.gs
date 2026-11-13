@@ -14,7 +14,8 @@ var QRCore = (function () {
     accepting: true,
     notice: '',
     categories: 'เมนูแนะนำ,อาหาร,เครื่องดื่ม,ของหวาน',
-    admins: ''
+    admins: '',
+    tableTokens: ''
   };
 
   function bk(d) { return new Date(new Date(d).getTime() + TZ); }
@@ -38,7 +39,25 @@ var QRCore = (function () {
     for (var k in DEFAULT_SETTINGS) out[k] = (s[k] === undefined || s[k] === '') ? DEFAULT_SETTINGS[k] : s[k];
     out.tables = Math.max(1, Math.min(200, parseInt(out.tables, 10) || 10));
     out.accepting = bool(out.accepting);
+    var tk = {};
+    try { tk = typeof out.tableTokens === 'string' ? JSON.parse(out.tableTokens || '{}') : (out.tableTokens || {}); } catch (e) { tk = {}; }
+    out.tableTokens = tk;
     return out;
+  }
+  function randTok() {
+    var c = 'abcdefghijkmnpqrstuvwxyz23456789', o = '';
+    for (var i = 0; i < 10; i++) o += c.charAt(Math.floor(Math.random() * c.length));
+    return o;
+  }
+  // Each table gets a random secret printed in its QR, so nobody can order / read a bill by guessing a table number.
+  function ensureTokens(store, s, rotate) {
+    var changed = false;
+    for (var i = 1; i <= s.tables; i++) if (rotate || !s.tableTokens[i]) { s.tableTokens[i] = randTok(); changed = true; }
+    if (changed) { var raw = store.getSettings() || {}; raw.tableTokens = JSON.stringify(s.tableTokens); store.saveSettings(raw); }
+    return s.tableTokens;
+  }
+  function adminSettings(store) {
+    var s = settings(store); ensureTokens(store, s); return s;
   }
   function publicSettings(s) {
     return { shopName: s.shopName, tables: s.tables, promptpay: s.promptpay, accepting: s.accepting, notice: s.notice, categories: s.categories };
@@ -66,10 +85,11 @@ var QRCore = (function () {
     return { settings: publicSettings(s), menu: menu };
   }
 
-  function validTable(s, t) {
+  function validTable(s, t, k) {
     t = str(t, 10);
     var n = parseInt(t, 10);
     if (!n || n < 1 || n > s.tables || String(n) !== t) throw fail('เลขโต๊ะไม่ถูกต้อง');
+    if (!s.tableTokens[n] || str(k, 40) !== s.tableTokens[n]) throw fail('QR โต๊ะนี้ไม่ถูกต้องหรือหมดอายุ กรุณาสแกน QR ที่โต๊ะอีกครั้ง', 'BAD_TABLE');
     return String(n);
   }
 
@@ -77,7 +97,7 @@ var QRCore = (function () {
     now = now || new Date();
     var s = settings(store);
     if (!s.accepting) throw fail('ขณะนี้ร้านปิดรับออเดอร์ชั่วคราว', 'CLOSED');
-    var table = validTable(s, p.table);
+    var table = validTable(s, p.table, p.k);
     var byId = {};
     store.getMenu().map(normMenu).forEach(function (m) { byId[m.id] = m; });
     var lines = (p.items || []).slice(0, 60);
@@ -103,7 +123,7 @@ var QRCore = (function () {
   function tableOrders(store, p, now) {
     now = now || new Date();
     var s = settings(store);
-    var table = validTable(s, p.table);
+    var table = validTable(s, p.table, p.k);
     var since = now.getTime() - 8 * 3600000;
     var list = store.getRecentOrders(since).filter(function (o) { return o.table === table && o.status !== 'cancelled'; });
     var unpaid = list.filter(function (o) { return o.status !== 'paid'; });
@@ -119,7 +139,7 @@ var QRCore = (function () {
   function callStaff(store, p, now) {
     now = now || new Date();
     var s = settings(store);
-    var table = validTable(s, p.table);
+    var table = validTable(s, p.table, p.k);
     var type = ({ staff: 1, bill: 1, water: 1 })[p.type] ? p.type : 'staff';
     var open = store.getCalls().filter(function (c) { return c.table === table && c.type === type && !bool(c.done); });
     if (open.length) return { id: open[0].id, already: true };
@@ -221,10 +241,11 @@ var QRCore = (function () {
       accepting: inc.accepting === undefined ? cur.accepting : bool(inc.accepting),
       notice: str(inc.notice, 200),
       categories: str(inc.categories, 300) || cur.categories,
-      admins: str(inc.admins, 1000).toLowerCase().replace(/\s+/g, '')
+      admins: str(inc.admins, 1000).toLowerCase().replace(/\s+/g, ''),
+      tableTokens: JSON.stringify(cur.tableTokens || {})
     };
     store.saveSettings(out);
-    return out;
+    return adminSettings(store);
   }
 
   /* ---------------- analytics ---------------- */
@@ -329,7 +350,7 @@ var QRCore = (function () {
       case 'placeOrder': return placeOrder(store, p, now);
       case 'tableOrders': return tableOrders(store, p, now);
       case 'callStaff': return callStaff(store, p, now);
-      case 'me': return { email: ctx.email || '', settings: settings(store) };
+      case 'me': return { email: ctx.email || '', settings: adminSettings(store) };
       case 'live': return live(store, now);
       case 'recentOrders': return store.getRecentOrders(now.getTime() - 864e5).slice(-60).reverse().map(publicOrder);
       case 'setStatus': return setStatus(store, p, now);
@@ -340,7 +361,8 @@ var QRCore = (function () {
       case 'saveMenuItem': return saveMenuItem(store, p, now);
       case 'deleteMenuItem': return deleteMenuItem(store, p);
       case 'setAvailable': return setAvailable(store, p, now);
-      case 'getSettings': return settings(store);
+      case 'getSettings': return adminSettings(store);
+      case 'rotateTableTokens': { var rs = settings(store); ensureTokens(store, rs, true); return adminSettings(store); }
       case 'saveSettings': return saveSettings(store, p);
     }
     throw fail('ไม่รู้จักคำสั่ง ' + action);
@@ -527,6 +549,7 @@ function toRow_(name, o) {
     var v = o[c];
     if (v === undefined || v === null) return '';
     if (typeof v === 'object') return JSON.stringify(v);
+    if (typeof v === 'string' && /^[-=+@]/.test(v) || typeof v === 'string' && (v.charCodeAt(0) === 9 || v.charCodeAt(0) === 13)) return "'" + v; // never let customer text become a formula
     return v;
   });
 }
