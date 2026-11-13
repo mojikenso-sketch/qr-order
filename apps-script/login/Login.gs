@@ -11,6 +11,8 @@ var ALLOWED_RETURN = [
 function doGet(e) {
   var ret = String((e && e.parameter && e.parameter['return']) || '');
   var ok = ALLOWED_RETURN.some(function (a) { return ret.indexOf(a) === 0; }) && ret.indexOf('#') < 0;
+  var state = String((e && e.parameter && e.parameter.state) || '');
+  if (!/^[A-Za-z0-9]{16,64}$/.test(state)) ok = false;
   var email = Session.getActiveUser().getEmail();
   var body;
   if (!ok) {
@@ -18,7 +20,7 @@ function doGet(e) {
   } else if (!email) {
     body = '<h1>เข้าสู่ระบบไม่สำเร็จ</h1><p>กรุณาเข้าสู่ระบบบัญชี Google ก่อน แล้วลองใหม่</p>';
   } else {
-    var url = ret + '#idt=' + encodeURIComponent(ScriptApp.getIdentityToken());
+    var url = ret + '#idt=' + encodeURIComponent(ScriptApp.getIdentityToken()) + '&state=' + state;
     body = '<div class="ic">✓</div><h1>เข้าสู่ระบบเป็น</h1><p class="em">' + esc_(email) + '</p>' +
       '<a class="btn" href="' + esc_(url) + '" target="_top">ไปหน้าหลังร้าน</a>' +
       '<p class="small">ไม่ใช่บัญชีนี้? สลับบัญชีที่มุมขวาบนของ Google แล้วเปิดลิงก์ใหม่</p>';

@@ -18,13 +18,17 @@
     if (QR.DEMO) { $('#demoLogin').classList.remove('hidden'); return; }
     if (!QR.CFG.LOGIN_URL) { le.textContent = 'ยังไม่ได้ตั้งค่า LOGIN_URL ใน config.js'; le.classList.remove('hidden'); return; }
     var back = location.href.replace(/#.*$/, '');
-    $('#gsiBtn').innerHTML = '<a class="btn primary block gbtn" href="' + esc(QR.CFG.LOGIN_URL + '?return=' + encodeURIComponent(back)) + '">' +
+    var st = Array.from(crypto.getRandomValues(new Uint8Array(16)), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    try { sessionStorage.setItem('qro_login_state', st); } catch (e) {}
+    $('#gsiBtn').innerHTML = '<a class="btn primary block gbtn" href="' + esc(QR.CFG.LOGIN_URL + '?return=' + encodeURIComponent(back) + '&state=' + st) + '">' +
       '<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>' +
       'เข้าสู่ระบบด้วย Google</a>';
   }
   // Back from the Login Apps Script with #idt=<Google ID token>: trade it for a session.
-  function finishGoogleLogin(idt) {
+  function finishGoogleLogin(idt, state) {
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    var want = null; try { want = sessionStorage.getItem('qro_login_state'); sessionStorage.removeItem('qro_login_state'); } catch (e) {}
+    if (!want || want !== state) return showLogin('ลิงก์เข้าสู่ระบบไม่ถูกต้อง กรุณากดปุ่มเข้าสู่ระบบจากหน้านี้');
     $('#loginErr').classList.add('hidden');
     $('#gsiBtn').innerHTML = '<div class="spinner"></div>';
     api('login', { idToken: idt }).then(function (r) { tryLogin(r.session); })
@@ -463,6 +467,7 @@
   if (location.hash === '#menu') switchTab('menu');
   var saved = null; try { saved = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
   var idt = (location.hash.match(/[#&]idt=([^&]+)/) || [])[1];
-  if (idt && !QR.DEMO) finishGoogleLogin(decodeURIComponent(idt));
+  var lst = (location.hash.match(/[#&]state=([^&]+)/) || [])[1];
+  if (idt && !QR.DEMO) finishGoogleLogin(decodeURIComponent(idt), lst || '');
   else if (saved) tryLogin(saved); else showLogin('');
 })();
