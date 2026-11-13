@@ -75,15 +75,39 @@
       '<div class="irow"><span class="iprice">' + baht(m.price) + ' ฿</span>' + ctl + '</div></div></div>';
   }
   function refreshItem(id) { var el = $('#it-' + id), m = byId(id); if (el && m) el.outerHTML = itemHtml(m); }
+  // Highlights the category chip for the section being read.
+  // Scroll-position based (not IntersectionObserver) so short last sections like "ของหวาน" still get picked:
+  // at the bottom of the page the last section wins, and a tapped chip stays active while the page scrolls to it.
+  var spyLockUntil = 0, spyBound = false;
+  function setActiveCat(id) {
+    $$('.cat').forEach(function (b) {
+      var on = b.dataset.go === id;
+      if (on && !b.classList.contains('active')) {
+        var bar = $('#cats'); bar.scrollTo({ left: b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2, behavior: 'smooth' });
+      }
+      b.classList.toggle('active', on);
+    });
+  }
+  function currentCat() {
+    var titles = $$('.cat-title'); if (!titles.length) return null;
+    var doc = document.documentElement;
+    if (window.innerHeight + window.scrollY >= doc.scrollHeight - 4) return titles[titles.length - 1].id;
+    var line = $('.ohead').getBoundingClientRect().bottom + 56, id = titles[0].id; // > scroll-margin-top gap (150px - header)
+    titles.forEach(function (h) { if (h.getBoundingClientRect().top <= line) id = h.id; });
+    return id;
+  }
   function spy() {
-    if (!('IntersectionObserver' in window)) return;
-    var io = new IntersectionObserver(function (es) {
-      es.forEach(function (e) {
-        if (!e.isIntersecting) return;
-        $$('.cat').forEach(function (b) { var on = b.dataset.go === e.target.id; b.classList.toggle('active', on); if (on) b.scrollIntoView({ inline: 'center', block: 'nearest' }); });
-      });
-    }, { rootMargin: '-160px 0px -65% 0px' });
-    $$('.cat-title').forEach(function (h) { io.observe(h); });
+    if (spyBound) return; spyBound = true;
+    var tick = false;
+    window.addEventListener('scroll', function () {
+      if (tick) return; tick = true;
+      requestAnimationFrame(function () { tick = false; if (Date.now() < spyLockUntil) return; var id = currentCat(); if (id) setActiveCat(id); });
+    }, { passive: true });
+  }
+  function goCat(id) {
+    var t = document.getElementById(id); if (!t) return;
+    setActiveCat(id); spyLockUntil = Date.now() + 900;
+    t.scrollIntoView({ behavior: 'smooth' });
   }
 
   /* ---------- cart ---------- */
@@ -207,7 +231,7 @@
     if (b.dataset.dec) { e.stopPropagation(); return setQty(b.dataset.dec, -1); }
     if (b.dataset.view) return show(b.dataset.view);
     if (b.dataset.callt) return call(b.dataset.callt);
-    if (b.dataset.go) { var t = document.getElementById(b.dataset.go); if (t) t.scrollIntoView({ behavior: 'smooth' }); return; }
+    if (b.dataset.go) return goCat(b.dataset.go);
     if (b.id === 'openCart') return openCart();
     if (b.id === 'btnBill') return bill();
     if (b.classList.contains('item') && !e.target.closest('.stepper') && b.dataset.item) {
