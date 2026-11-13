@@ -8,6 +8,9 @@
  * it hands back a Google-signed ID token, which the "login" action below exchanges for a 6-hour session.
  */
 var SESSION_SECONDS = 21600; // CacheService max (6 h)
+// true = the owner page needs no login (owner's choice 2026-11-14). Anyone with the API URL can then use owner actions.
+// Set to false to require the Google login again (also set OPEN_ADMIN: false in docs/config.js).
+var OPEN_ADMIN = true;
 
 var SHEETS = {
   Menu: ['id', 'name', 'price', 'category', 'image', 'available', 'desc', 'sort', 'updated'],
@@ -29,7 +32,8 @@ function doPost(e) {
   try {
     if (action === 'login') return json_(login_(String(p.idToken || '')));
     var ctx = { now: new Date(), admin: false, email: '' };
-    if (body.token) {
+    if (OPEN_ADMIN) ctx.admin = true;
+    else if (body.token) {
       var email = sessionEmail_(String(body.token));
       if (email && isAdmin_(email)) { ctx.admin = true; ctx.email = email; }
       else if (!PUBLIC_ACTIONS[action]) return json_({ ok: false, code: 'AUTH', error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });

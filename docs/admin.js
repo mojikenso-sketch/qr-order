@@ -34,6 +34,12 @@
     api('login', { idToken: idt }).then(function (r) { tryLogin(r.session); })
       .catch(function (e) { showLogin(e.message); });
   }
+  // No-login mode: the owner page opens straight away.
+  function openApp() {
+    $('#btnLogout').classList.add('hidden');
+    api('me').then(function (me) { S.settings = me.settings; S.email = ''; startApp(); })
+      .catch(function (e) { showLogin(e.message); });
+  }
   function tryLogin(tok) {
     QR.setToken(tok);
     api('me').then(function (me) {
@@ -394,7 +400,7 @@
       '<label class="switch"><input type="checkbox" id="sAcc"' + (s.accepting ? ' checked' : '') + '><span class="track"></span><span>เปิดรับออเดอร์ผ่าน QR</span></label>' +
       '<div class="field" style="margin-top:10px"><label for="sNotice">ประกาศหน้าเมนูลูกค้า</label><input id="sNotice" class="input" maxlength="200" value="' + esc(s.notice) + '" placeholder="เช่น วันนี้ข้าวเหนียวมะม่วงหมด / ปิด 21:00 น."></div>' +
       '<div class="field"><label for="sCats">หมวดหมู่เมนู (คั่นด้วย ,)</label><input id="sCats" class="input" value="' + esc(s.categories) + '"></div>' +
-      '<div class="field"><label for="sAdmins">อีเมล Gmail ที่เข้าหลังร้านได้ (คั่นด้วย ,)</label><textarea id="sAdmins" class="input" placeholder="staff1@gmail.com, staff2@gmail.com">' + esc(s.admins) + '</textarea><span class="hint">เจ้าของ (บัญชีที่ติดตั้งระบบ) เข้าได้เสมอ' + (S.email ? ' · คุณเข้าสู่ระบบเป็น ' + esc(S.email) : '') + '</span></div>' +
+      (QR.CFG.OPEN_ADMIN ? '<input type="hidden" id="sAdmins" value="' + esc(s.admins) + '">' : '<div class="field"><label for="sAdmins">อีเมล Gmail ที่เข้าหลังร้านได้ (คั่นด้วย ,)</label><textarea id="sAdmins" class="input" placeholder="staff1@gmail.com, staff2@gmail.com">' + esc(s.admins) + '</textarea><span class="hint">เจ้าของ (บัญชีที่ติดตั้งระบบ) เข้าได้เสมอ' + (S.email ? ' · คุณเข้าสู่ระบบเป็น ' + esc(S.email) : '') + '</span></div>') +
       (QR.DEMO ? '<button class="btn sm danger" id="sReset">' + icon('refresh', 16) + ' รีเซ็ตข้อมูลตัวอย่าง</button>' : ''),
       '<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="sSave">' + icon('check', 18) + ' บันทึก</button>');
     var el = md.el;
@@ -469,5 +475,6 @@
   var idt = (location.hash.match(/[#&]idt=([^&]+)/) || [])[1];
   var lst = (location.hash.match(/[#&]state=([^&]+)/) || [])[1];
   if (idt && !QR.DEMO) finishGoogleLogin(decodeURIComponent(idt), lst || '');
+  else if (QR.CFG.OPEN_ADMIN && !QR.DEMO) openApp();
   else if (saved) tryLogin(saved); else showLogin('');
 })();
