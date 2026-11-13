@@ -105,7 +105,6 @@
     var md = modal('ตะกร้าของคุณ · โต๊ะ ' + table,
       '<div id="cl"></div>' +
       '<div class="field" style="margin-top:14px"><label for="oNote">หมายเหตุถึงร้าน (ถ้ามี)</label><input id="oNote" class="input" maxlength="200" placeholder="เช่น แยกจาน, มีเด็กเล็ก"></div>' +
-      '<div class="field"><label for="oName">ชื่อเล่น (ไม่บังคับ)</label><input id="oName" class="input" maxlength="40" placeholder="ให้พนักงานเรียกถูกคน"></div>' +
       '<div class="ctotal"><span>รวม</span><span id="ct"></span></div>',
       '<button class="btn" data-close>สั่งเพิ่ม</button><button class="btn primary" id="oSend" style="flex:1">' + icon('check', 18) + ' ยืนยันสั่งอาหาร</button>');
     var el = md.el;
@@ -135,7 +134,7 @@
     $('#oSend', el).addEventListener('click', function () {
       var btn = this; btn.disabled = true; btn.innerHTML = 'กำลังส่ง…';
       var items = cartLines().map(function (x) { return { id: x.m.id, qty: x.c.qty, note: x.c.note }; });
-      api('placeOrder', { table: table, k: tkey, items: items, note: $('#oNote', el).value, name: $('#oName', el).value }).then(function (o) {
+      api('placeOrder', { table: table, k: tkey, items: items, note: $('#oNote', el).value }).then(function (o) {
         S.cart = {}; saveCart(); md.close(); renderMenu(); renderCartBar();
         var ok = modal('ส่งออเดอร์แล้ว',
           '<div class="center"><div class="done-ic">' + icon('check', 40) + '</div><h3>ออเดอร์ #' + o.no + ' เข้าครัวแล้ว</h3><p class="muted">โต๊ะ ' + esc(o.table) + ' · ' + o.items.length + ' รายการ · ' + baht(o.total) + ' บาท</p><p class="small muted">ติดตามสถานะได้ที่ "ออเดอร์ของฉัน"</p></div>',
