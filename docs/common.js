@@ -1,7 +1,7 @@
 /* QR Order — shared browser helpers: API client, demo store, icons, formatting, PromptPay. */
 (function () {
   var CFG = window.QR_CONFIG || {};
-  var DEMO = !CFG.API_URL;
+  var DEMO = !CFG.API_URL || /[?&]demo=1(&|$)/.test(location.search); // ?demo=1 = try-it mode for prospects
   var LS = 'qro_demo_';
 
   /* ---------- demo store (localStorage) ---------- */

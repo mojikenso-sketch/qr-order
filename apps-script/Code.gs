@@ -3,10 +3,11 @@
  * Setup:
  *   1) Run setup() once (creates the Google Sheet + makes you the owner).
  *      Optional: run seedDemoData() to fill 30 days of sample orders.
- *   2) Set GOOGLE_CLIENT_ID below (OAuth Web client ID used by the admin login).
- *   3) Deploy > New deployment > Web app: Execute as "Me", Who has access "Anyone".
+ *   2) Deploy > Web app: Execute as "Me", Who has access "Anyone".
+ * Admin login comes from the separate "QR Order Login" Apps Script (apps-script/Login.gs):
+ * it hands back a Google-signed ID token, which the "login" action below exchanges for a 6-hour session.
  */
-var GOOGLE_CLIENT_ID = 'PASTE_GOOGLE_CLIENT_ID_HERE';
+var SESSION_SECONDS = 21600; // CacheService max (6 h)
 
 var SHEETS = {
   Menu: ['id', 'name', 'price', 'category', 'image', 'available', 'desc', 'sort', 'updated'],
@@ -15,6 +16,7 @@ var SHEETS = {
   Settings: ['key', 'value']
 };
 var ADMIN_ACTIONS_WRITE = { me: 1, getSettings: 1, rotateTableTokens: 1, setStatus: 1, payTable: 1, resolveCall: 1, saveMenuItem: 1, deleteMenuItem: 1, setAvailable: 1, saveSettings: 1, uploadImage: 1 };
+var PUBLIC_ACTIONS = { menu: 1, placeOrder: 1, tableOrders: 1, callStaff: 1 };
 
 /* ---------------- web entry ---------------- */
 function doGet() { return json_({ ok: true, service: 'QR Order API' }); }
@@ -25,21 +27,19 @@ function doPost(e) {
   var action = String(body.action || ''), p = body.payload || {};
   var lock = null;
   try {
+    if (action === 'login') return json_(login_(String(p.idToken || '')));
     var ctx = { now: new Date(), admin: false, email: '' };
     if (body.token) {
-      var email = verifyIdToken_(body.token);
-      if (email) {
-        if (!isAdmin_(email)) return json_({ ok: false, code: 'NOT_ADMIN', error: 'บัญชี ' + email + ' ไม่มีสิทธิ์จัดการร้าน', email: email });
-        ctx.admin = true; ctx.email = email;
-      } else if (action !== 'menu' && action !== 'placeOrder' && action !== 'tableOrders' && action !== 'callStaff') {
-        return json_({ ok: false, code: 'AUTH', error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
-      }
+      var email = sessionEmail_(String(body.token));
+      if (email && isAdmin_(email)) { ctx.admin = true; ctx.email = email; }
+      else if (!PUBLIC_ACTIONS[action]) return json_({ ok: false, code: 'AUTH', error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
     }
     if (action === 'placeOrder' || action === 'callStaff' || ADMIN_ACTIONS_WRITE[action]) {
       lock = LockService.getScriptLock(); lock.waitLock(20000);
     }
     var data;
-    if (action === 'uploadImage') {
+    if (action === 'logout') { if (body.token) CacheService.getScriptCache().remove('sess_' + body.token); data = { ok: true }; }
+    else if (action === 'uploadImage') {
       if (!ctx.admin) return json_({ ok: false, code: 'AUTH', error: 'กรุณาเข้าสู่ระบบ' });
       data = uploadImage_(p);
     } else {
@@ -56,21 +56,33 @@ function doPost(e) {
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
 /* ---------------- auth ---------------- */
-function verifyIdToken_(tok) {
-  var cache = CacheService.getScriptCache();
-  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, tok)).slice(0, 43);
-  var hit = cache.get(key);
-  if (hit) return hit;
-  var r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(tok), { muteHttpExceptions: true });
-  if (r.getResponseCode() !== 200) return null;
+// Verifies a Google-signed ID token from the Login script, then issues a random session id.
+function login_(idToken) {
+  if (!idToken) return { ok: false, code: 'AUTH', error: 'ไม่พบข้อมูลการเข้าสู่ระบบ' };
+  var r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return { ok: false, code: 'AUTH', error: 'การเข้าสู่ระบบหมดอายุ กรุณาลองใหม่' };
   var j = JSON.parse(r.getContentText());
-  if (j.aud !== GOOGLE_CLIENT_ID) return null;
-  if (String(j.email_verified) !== 'true') return null;
-  var ttl = Math.floor(Number(j.exp) - Date.now() / 1000);
-  if (ttl < 30) return null;
+  if (String(j.email_verified) !== 'true' || !j.email) return { ok: false, code: 'AUTH', error: 'บัญชี Google นี้ยังไม่ยืนยันอีเมล' };
+  if (Number(j.exp) * 1000 < Date.now()) return { ok: false, code: 'AUTH', error: 'การเข้าสู่ระบบหมดอายุ กรุณาลองใหม่' };
   var email = String(j.email).toLowerCase();
-  cache.put(key, email, Math.min(ttl, 3000));
-  return email;
+  var props = PropertiesService.getScriptProperties();
+  var aud = props.getProperty('LOGIN_AUD');
+  var owner = String(props.getProperty('OWNER_EMAIL') || '').toLowerCase();
+  if (!aud) {
+    // Trust-on-first-use: the owner's first login pins which Login script may vouch for users.
+    if (email !== owner) return { ok: false, code: 'AUTH', error: 'เจ้าของร้าน (' + owner + ') ต้องเข้าสู่ระบบเป็นคนแรก' };
+    props.setProperty('LOGIN_AUD', String(j.aud)); aud = String(j.aud);
+  }
+  if (String(j.aud) !== aud) return { ok: false, code: 'AUTH', error: 'ลิงก์เข้าสู่ระบบไม่ถูกต้อง' };
+  if (!isAdmin_(email)) return { ok: false, code: 'NOT_ADMIN', error: 'บัญชี ' + email + ' ไม่มีสิทธิ์จัดการร้าน', email: email };
+  var sid = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put('sess_' + sid, email, SESSION_SECONDS);
+  return { ok: true, data: { session: sid, email: email } };
+}
+
+function sessionEmail_(sid) {
+  if (!/^[a-f0-9]{64}$/.test(sid)) return null;
+  return CacheService.getScriptCache().get('sess_' + sid);
 }
 
 function isAdmin_(email) {
@@ -238,7 +250,7 @@ function setup() {
   if (!store.getMenu().length) store.saveMenu(QRCore.demoMenu());
   if (!Object.keys(store.getSettings()).length) store.saveSettings(QRCore.DEFAULT_SETTINGS);
   DriveApp.getRootFolder(); // ask for Drive scope now (menu images)
-  UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true }); // ask for UrlFetch scope now
+  UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo', { muteHttpExceptions: true }); // ask for UrlFetch scope now
   Logger.log('Sheet: ' + book.getUrl() + '\nOwner: ' + Session.getEffectiveUser().getEmail());
 }
 

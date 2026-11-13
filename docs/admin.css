@@ -164,3 +164,5 @@
   #printArea .qr-card a { display: none; }
   @page { margin: 10mm; }
 }
+.gbtn { gap: 10px; font-size: 16px; text-decoration: none; background: #fff; color: var(--ink); border-color: var(--line-2); }
+.gbtn:hover { background: var(--primary-50); }

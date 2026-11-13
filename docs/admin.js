@@ -16,16 +16,20 @@
     var le = $('#loginErr');
     if (msg) { le.textContent = msg; le.classList.remove('hidden'); } else le.classList.add('hidden');
     if (QR.DEMO) { $('#demoLogin').classList.remove('hidden'); return; }
-    if (!QR.CFG.GOOGLE_CLIENT_ID) { le.textContent = 'ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID ใน config.js'; le.classList.remove('hidden'); return; }
-    var tries = 0;
-    (function waitGsi() {
-      if (!(window.google && google.accounts && google.accounts.id)) { if (tries++ < 50) setTimeout(waitGsi, 200); return; }
-      google.accounts.id.initialize({ client_id: QR.CFG.GOOGLE_CLIENT_ID, callback: onCredential, auto_select: true, ux_mode: 'popup' });
-      google.accounts.id.renderButton($('#gsiBtn'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'th', width: 300 });
-      if (!msg) google.accounts.id.prompt();
-    })();
+    if (!QR.CFG.LOGIN_URL) { le.textContent = 'ยังไม่ได้ตั้งค่า LOGIN_URL ใน config.js'; le.classList.remove('hidden'); return; }
+    var back = location.href.replace(/#.*$/, '');
+    $('#gsiBtn').innerHTML = '<a class="btn primary block gbtn" href="' + esc(QR.CFG.LOGIN_URL + '?return=' + encodeURIComponent(back)) + '">' +
+      '<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>' +
+      'เข้าสู่ระบบด้วย Google</a>';
   }
-  function onCredential(r) { tryLogin(r.credential); }
+  // Back from the Login Apps Script with #idt=<Google ID token>: trade it for a session.
+  function finishGoogleLogin(idt) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    $('#loginErr').classList.add('hidden');
+    $('#gsiBtn').innerHTML = '<div class="spinner"></div>';
+    api('login', { idToken: idt }).then(function (r) { tryLogin(r.session); })
+      .catch(function (e) { showLogin(e.message); });
+  }
   function tryLogin(tok) {
     QR.setToken(tok);
     api('me').then(function (me) {
@@ -41,8 +45,8 @@
   function logout(expired) {
     clearInterval(S.liveTimer);
     try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    if (!expired && QR.getToken() && !QR.DEMO) api('logout').catch(function () {});
     QR.setToken(null);
-    if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
     showLogin(expired ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง' : '');
   }
 
@@ -351,7 +355,7 @@
   function orderBase() {
     var b = QR.CFG.PUBLIC_URL || location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
     if (b.slice(-1) !== '/') b += '/';
-    return b + 'order.html?t=';
+    return b + 'order.html?' + (QR.DEMO && QR.CFG.API_URL ? 'demo=1&' : '') + 't=';
   }
   function showQr() {
     var n = S.settings.tables, base = orderBase(), cards = '';
@@ -456,8 +460,9 @@
   try { S.sound = localStorage.getItem('qro_sound') !== '0'; } catch (e) {}
   renderSound();
   if (QR.DEMO) $('#demoBar').classList.remove('hidden');
-  else { var s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true; document.head.appendChild(s); }
   if (location.hash === '#menu') switchTab('menu');
   var saved = null; try { saved = sessionStorage.getItem(TOKEN_KEY); } catch (e) {}
-  if (saved) tryLogin(saved); else showLogin('');
+  var idt = (location.hash.match(/[#&]idt=([^&]+)/) || [])[1];
+  if (idt && !QR.DEMO) finishGoogleLogin(decodeURIComponent(idt));
+  else if (saved) tryLogin(saved); else showLogin('');
 })();
