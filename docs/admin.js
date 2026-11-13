@@ -206,7 +206,8 @@
         '<div class="v"><b>' + (S.topBy === 'qty' ? x.qty.toLocaleString() + ' ที่' : baht(x.sales) + ' ฿') + '</b><span class="muted">' + (S.topBy === 'qty' ? baht(x.sales) + ' ฿' : x.qty + ' ที่') + '</span></div></li>';
     }).join('') : '<li class="empty small" style="display:block">ไม่มีข้อมูล</li>';
   }
-  var PALETTE = ['#DC2626', '#F59E0B', '#EA580C', '#15803D', '#2563EB', '#9333EA', '#DB2777', '#0D9488'];
+  // categorical order validated with the dataviz palette checker (CVD + contrast pass)
+  var PALETTE = ['#DC2626', '#2563EB', '#D97706', '#0D9488', '#9333EA', '#DB2777', '#65A30D', '#0284C7'];
   function chart(id, cfg) {
     if (!window.Chart) return;
     if (S.charts[id]) S.charts[id].destroy();
@@ -233,14 +234,82 @@
       options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return baht(c.raw) + ' บาท · ' + d.daily[c.dataIndex].orders + ' ออเดอร์'; } } } },
         scales: { y: { beginAtZero: true, grid: { color: '#F5EDE9' } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } } } }
     });
+    // Category share: colour follows the category name (not its rank); labels are pulled out with leader lines.
+    var catNames = cats(), catTotal = d.categories.reduce(function (a, x) { return a + x.sales; }, 0);
+    d.categories.forEach(function (c) { if (catNames.indexOf(c.category) < 0) catNames.push(c.category); });
     chart('chCat', {
       type: 'doughnut',
-      data: { labels: d.categories.map(function (c) { return c.category; }), datasets: [{ data: d.categories.map(function (c) { return c.sales; }), backgroundColor: PALETTE, borderColor: '#fff', borderWidth: 2 }] },
-      options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'right' }, tooltip: { callbacks: { label: function (c) {
-        var tot = d.categories.reduce(function (a, x) { return a + x.sales; }, 0);
-        return c.label + ': ' + baht(c.raw) + ' ฿ (' + (tot ? (c.raw / tot * 100).toFixed(1) : 0) + '%)'; } } } } }
+      data: { labels: d.categories.map(function (c) { return c.category; }),
+        datasets: [{ data: d.categories.map(function (c) { return c.sales; }),
+          backgroundColor: d.categories.map(function (c) { return PALETTE[catNames.indexOf(c.category) % PALETTE.length]; }),
+          borderColor: '#fff', borderWidth: 2, hoverOffset: 4 }] },
+      options: { maintainAspectRatio: false, cutout: '64%',
+        layout: { padding: function (c) { var w = c.chart.width; var side = Math.round(Math.min(150, Math.max(92, w * 0.3))); return { left: side, right: side, top: 30, bottom: 30 }; } },
+        plugins: { legend: { display: false }, callouts: { total: catTotal },
+          tooltip: { callbacks: { label: function (c) { return c.label + ': ' + baht(c.raw) + ' ฿ (' + (catTotal ? (c.raw / catTotal * 100).toFixed(1) : 0) + '%)'; } } } } },
+      plugins: [calloutPlugin]
     });
   }
+  // Draws each slice's name, % and baht outside the ring with a leader line.
+  // Labels are stacked per side so they never overlap, and text is shrunk / truncated so it never leaves the canvas.
+  var calloutPlugin = {
+    id: 'callouts',
+    afterDatasetsDraw: function (ch, args, opts) {
+      var meta = ch.getDatasetMeta(0), arcs = meta.data;
+      if (!arcs.length) return;
+      var ctx = ch.ctx, W = ch.width, H = ch.height, tot = opts.total || 0;
+      var cx = arcs[0].x, cy = arcs[0].y, r = arcs[0].outerRadius, ri = arcs[0].innerRadius;
+      var gap = Math.max(8, ch.chartArea.left - (cx - r)) ; // free space beside the ring
+      var colW = Math.max(40, (W - 2 * r) / 2 - 26);       // text width available on each side
+      var threeLines = colW < 130, LH = threeLines ? 58 : 42; // Thai needs room for marks above/below
+      var FONT = "'IBM Plex Sans Thai', sans-serif";
+      function fit(text, weight, size, maxW, min) {
+        var f = size;
+        for (; f >= (min || 10); f--) { ctx.font = weight + ' ' + f + 'px ' + FONT; if (ctx.measureText(text).width <= maxW) return text; }
+        ctx.font = weight + ' ' + (min || 10) + 'px ' + FONT;
+        var t = text; while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+        return t + '…';
+      }
+      var items = [];
+      arcs.forEach(function (a, i) {
+        var v = ch.data.datasets[0].data[i];
+        if (!v || a.hidden) return;
+        var ang = (a.startAngle + a.endAngle) / 2, cos = Math.cos(ang), sin = Math.sin(ang);
+        items.push({ right: cos >= 0, x0: cx + cos * r, y0: cy + sin * r, xe: cx + cos * (r + 10), y: cy + sin * (r + 10),
+          color: a.options.backgroundColor, name: String(ch.data.labels[i]), pct: tot ? v / tot * 100 : 0, val: v });
+      });
+      var top = LH / 2 + 6, bottom = H - LH / 2 - 6;
+      [true, false].forEach(function (side) {
+        var g = items.filter(function (it) { return it.right === side; }).sort(function (a, b) { return a.y - b.y; });
+        g.forEach(function (it, k) { it.ly = Math.max(it.y, k ? g[k - 1].ly + LH : top); });
+        for (var k = g.length - 1; k >= 0; k--) { var lim = k === g.length - 1 ? bottom : g[k + 1].ly - LH; if (g[k].ly > lim) g[k].ly = lim; }
+      });
+      ctx.save();
+      items.forEach(function (it) {
+        var dir = it.right ? 1 : -1, xh = cx + dir * (r + 20), xt = xh + dir * 6;
+        var maxW = it.right ? W - xt - 4 : xt - 4;
+        ctx.strokeStyle = '#A8A29E'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(it.x0, it.y0); ctx.lineTo(it.xe, it.ly); ctx.lineTo(xh, it.ly); ctx.stroke();
+        ctx.fillStyle = it.color; ctx.beginPath(); ctx.arc(it.x0, it.y0, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.textAlign = it.right ? 'left' : 'right'; ctx.textBaseline = 'middle';
+        var pct = it.pct.toFixed(1) + '%', money = baht(it.val) + ' ฿';
+        if (threeLines) {
+          ctx.fillStyle = '#3B0D0D'; var n = fit(it.name, '600', 13, maxW, 10); ctx.fillText(n, xt, it.ly - 18);
+          ctx.fillStyle = '#3B0D0D'; var p = fit(pct, '700', 14, maxW, 10); ctx.fillText(p, xt, it.ly + 1);
+          ctx.fillStyle = '#57534E'; var m = fit(money, '400', 12, maxW, 9); ctx.fillText(m, xt, it.ly + 19);
+        } else {
+          ctx.fillStyle = '#3B0D0D'; var l1 = fit(it.name + '  ' + pct, '600', 13, maxW, 10); ctx.fillText(l1, xt, it.ly - 9);
+          ctx.fillStyle = '#57534E'; var l2 = fit(money, '400', 12, maxW, 9); ctx.fillText(l2, xt, it.ly + 11);
+        }
+      });
+      // centre: total
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      var inner = ri * 1.6;
+      ctx.fillStyle = '#78716C'; ctx.fillText(fit('ยอดรวม', '400', 12, inner, 9), cx, cy - 10);
+      ctx.fillStyle = '#3B0D0D'; ctx.fillText(fit(baht(tot) + ' ฿', '700', 16, inner, 9), cx, cy + 9);
+      ctx.restore();
+    }
+  };
   function renderHeat(heat) {
     var DOW = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'], order = [1, 2, 3, 4, 5, 6, 0];
     var max = 0; heat.forEach(function (r) { r.forEach(function (v) { if (v > max) max = v; }); });
