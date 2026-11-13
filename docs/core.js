@@ -385,7 +385,7 @@ var QRCore = (function () {
       ['ข้าวเหนียวมะม่วง', 80, 'ของหวาน', 'ตามฤดูกาล']
     ];
     return rows.map(function (r, i) {
-      return { id: 'm' + (i + 1), name: r[0], price: r[1], category: r[2], image: '', available: true, desc: r[3], sort: (i + 1) * 10, updated: '' };
+      return { id: 'm' + (i + 1), name: r[0], price: r[1], category: r[2], image: 'img/menu/m' + (i + 1) + '.jpg', available: true, desc: r[3], sort: (i + 1) * 10, updated: '' };
     });
   }
 

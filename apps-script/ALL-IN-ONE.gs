@@ -386,7 +386,7 @@ var QRCore = (function () {
       ['ข้าวเหนียวมะม่วง', 80, 'ของหวาน', 'ตามฤดูกาล']
     ];
     return rows.map(function (r, i) {
-      return { id: 'm' + (i + 1), name: r[0], price: r[1], category: r[2], image: '', available: true, desc: r[3], sort: (i + 1) * 10, updated: '' };
+      return { id: 'm' + (i + 1), name: r[0], price: r[1], category: r[2], image: 'img/menu/m' + (i + 1) + '.jpg', available: true, desc: r[3], sort: (i + 1) * 10, updated: '' };
     });
   }
 
@@ -704,7 +704,10 @@ function seedDemoData() {
   if (need > 0) s.insertRowsAfter(s.getMaxRows(), need);
   s.getRange(1, 1, s.getMaxRows(), w).setNumberFormat('@');
   s.getRange(2, 1, orders.length, w).setValues(orders.map(function (o) { return toRow_('Orders', o); }));
-  SheetStore_().saveMenu(QRCore.demoMenu());
+  var store = SheetStore_();
+  store.saveMenu(QRCore.demoMenu());
+  var st = store.getSettings();
+  if (!st.shopName || st.shopName === QRCore.DEFAULT_SETTINGS.shopName) { st.shopName = 'ร้านก๋วยเตี๋ยวตัวอย่าง'; store.saveSettings(st); }
   Logger.log(orders.length + ' orders');
 }
 
