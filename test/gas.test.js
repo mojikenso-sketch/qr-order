@@ -121,5 +121,23 @@ const f = post('placeOrder', { table: '4', k: K[4], items: [{ id: 'm1', qty: 1 }
 const row = orders.rows.find(r => r && r[0] === f.data.id);
 assert.strictEqual(row[6], "'=1+1");
 
+// retry-safe placeOrder (same cid twice -> one order)
+const r1 = post('placeOrder', { table: '5', k: K[5], items: [{ id: 'm2', qty: 1 }], cid: 'abc123' });
+const r2 = post('placeOrder', { table: '5', k: K[5], items: [{ id: 'm2', qty: 1 }], cid: 'abc123' });
+assert.ok(r1.ok && r2.ok && r1.data.id === r2.data.id, 'duplicate submit returns the same order');
+assert.strictEqual(orders.rows[0][11], 'cid', 'header gained cid column');
+// no rolling back a paid order from a stale card
+post('setStatus', { id: r1.data.id, status: 'paid' });
+const back = post('setStatus', { id: r1.data.id, status: 'cooking' });
+assert.ok(!back.ok && back.code === 'STALE', JSON.stringify(back));
+// broken hand-edited row doesn't break queries
+orders.rows.push(['broken1', '', 'not a date', '1', '[]', '0', '', '', 'new', '', '', '']);
+assert.ok(post('live').ok && post('dashboard', {}).ok && post('placeOrder', { table: '5', k: K[5], items: [{ id: 'm2', qty: 1 }] }).ok, 'bad row tolerated');
+// menu never reads empty while being rewritten (write-then-trim)
+const before = post('menu').data.menu.length;
+post('setAvailable', { id: 'm1', available: false });
+assert.strictEqual(post('menu').data.menu.length, before);
+post('setAvailable', { id: 'm1', available: true });
 console.log('GAS TESTS PASS (' + seeded + ' seeded, ' + (ids.length - beforeTick) + ' added by demoTick)');
-assert.ok(ids.length - beforeTick > 20, 'demoTick added rows');
+const expectAdded = ctx.QRCore.demoOrdersBetween(Date.now() - 6 * 3600e3 - 60e3, Date.now()).length; // back-fill is capped at 6 h
+assert.ok(Math.abs((ids.length - beforeTick) - expectAdded) <= 1, 'demoTick added ' + (ids.length - beforeTick) + ' expected ~' + expectAdded);

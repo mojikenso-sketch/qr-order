@@ -116,6 +116,7 @@
     var c = S.cart[id] || { qty: 0, note: '' };
     c.qty = Math.max(0, Math.min(50, c.qty + d));
     if (c.qty) S.cart[id] = c; else delete S.cart[id];
+    S.cid = null; // cart changed: next submit is a new order
     saveCart(); refreshItem(id); renderCartBar();
   }
   function cartLines() { return Object.keys(S.cart).map(function (id) { return { m: byId(id), c: S.cart[id] }; }).filter(function (x) { return x.m; }); }
@@ -160,8 +161,10 @@
     $('#oSend', el).addEventListener('click', function () {
       var btn = this; btn.disabled = true; btn.innerHTML = 'กำลังส่ง…';
       var items = cartLines().map(function (x) { return { id: x.m.id, qty: x.c.qty, note: x.c.note }; });
-      api('placeOrder', { table: table, k: tkey, items: items, note: $('#oNote', el).value }).then(function (o) {
-        S.cart = {}; saveCart(); md.close(); renderMenu(); renderCartBar();
+      // one id per submission; kept until it succeeds so a retry after a network error can't double-order
+      if (!S.cid) S.cid = Array.from(crypto.getRandomValues(new Uint8Array(12)), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+      api('placeOrder', { table: table, k: tkey, items: items, note: $('#oNote', el).value, cid: S.cid }).then(function (o) {
+        S.cid = null; S.cart = {}; saveCart(); md.close(); renderMenu(); renderCartBar();
         var ok = modal('ส่งออเดอร์แล้ว',
           '<div class="center"><div class="done-ic">' + icon('check', 40) + '</div><h3>ออเดอร์ #' + o.no + ' เข้าครัวแล้ว</h3><p class="muted">โต๊ะ ' + esc(o.table) + ' · ' + o.items.length + ' รายการ · ' + baht(o.total) + ' บาท</p><p class="small muted">ติดตามสถานะได้ที่ "ออเดอร์ของฉัน"</p></div>',
           '<button class="btn" data-close>สั่งเพิ่ม</button><button class="btn primary" id="goOrd">ดูสถานะออเดอร์</button>');

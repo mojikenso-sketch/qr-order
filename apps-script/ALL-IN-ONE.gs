@@ -98,6 +98,13 @@ var QRCore = (function () {
     var s = settings(store);
     if (!s.accepting) throw fail('ขณะนี้ร้านปิดรับออเดอร์ชั่วคราว', 'CLOSED');
     var table = validTable(s, p.table, p.k);
+    // Retry-safe: the phone sends the same cid when it re-submits after a timeout, so we return the order
+    // that was already written instead of creating a duplicate.
+    var cid = str(p.cid, 40);
+    if (cid) {
+      var dup = store.getRecentOrders(now.getTime() - 2 * 3600000).filter(function (o) { return o.cid === cid && o.table === table; })[0];
+      if (dup) return publicOrder(dup);
+    }
     var byId = {};
     store.getMenu().map(normMenu).forEach(function (m) { byId[m.id] = m; });
     var lines = (p.items || []).slice(0, 60);
@@ -114,7 +121,7 @@ var QRCore = (function () {
     var iso = now.toISOString();
     var order = {
       id: uid('o'), no: store.nextOrderNo(dayKey(now)), created: iso, table: table, items: items, total: total,
-      note: str(p.note, 200), name: str(p.name, 40), status: 'new', updated: iso, servedAt: ''
+      note: str(p.note, 200), name: str(p.name, 40), status: 'new', updated: iso, servedAt: '', cid: cid
     };
     store.addOrder(order);
     return publicOrder(order);
@@ -147,7 +154,8 @@ var QRCore = (function () {
     var s = settings(store);
     var table = validTable(s, p.table, p.k);
     var type = ({ staff: 1, bill: 1, water: 1 })[p.type] ? p.type : 'staff';
-    var open = store.getCalls().filter(function (c) { return c.table === table && c.type === type && !bool(c.done); });
+    var since = now.getTime() - 8 * 3600000;
+    var open = store.getCalls().filter(function (c) { return c.table === table && c.type === type && !bool(c.done) && new Date(c.created).getTime() > since; });
     if (open.length) return { id: open[0].id, already: true };
     var c = { id: uid('c'), created: now.toISOString(), table: table, type: type, done: false, doneAt: '' };
     store.addCall(c);
@@ -175,9 +183,17 @@ var QRCore = (function () {
   function setStatus(store, p, now) {
     now = now || new Date();
     if (STATUSES.indexOf(p.status) < 0) throw fail('สถานะไม่ถูกต้อง');
+    var id = str(p.id, 40);
+    var cur = store.getRecentOrders(now.getTime() - 14 * 864e5).filter(function (o) { return o.id === id; })[0];
+    if (!cur) throw fail('ไม่พบออเดอร์');
+    var NEXT = { 'new': ['cooking', 'served', 'paid', 'cancelled'], cooking: ['served', 'paid', 'cancelled'], served: ['paid', 'cancelled'], paid: ['cancelled'], cancelled: [] };
+    if (cur.status === p.status) return publicOrder(cur);
+    if ((NEXT[cur.status] || []).indexOf(p.status) < 0) {
+      throw fail('ออเดอร์ #' + cur.no + ' ถูกเปลี่ยนเป็น "' + ({ 'new': 'ใหม่', cooking: 'กำลังทำ', served: 'เสิร์ฟแล้ว', paid: 'ชำระแล้ว', cancelled: 'ยกเลิก' })[cur.status] + '" ไปแล้ว', 'STALE');
+    }
     var patch = { status: p.status, updated: now.toISOString() };
-    if (p.status === 'served') patch.servedAt = now.toISOString();
-    var o = store.updateOrder(str(p.id, 40), patch);
+    if (p.status === 'served' || (p.status === 'paid' && !cur.servedAt)) patch.servedAt = now.toISOString();
+    var o = store.updateOrder(id, patch);
     if (!o) throw fail('ไม่พบออเดอร์');
     return publicOrder(o);
   }
@@ -485,7 +501,7 @@ var OPEN_ADMIN = true;
 
 var SHEETS = {
   Menu: ['id', 'name', 'price', 'category', 'image', 'available', 'desc', 'sort', 'updated'],
-  Orders: ['id', 'no', 'created', 'table', 'items', 'total', 'note', 'name', 'status', 'updated', 'servedAt'],
+  Orders: ['id', 'no', 'created', 'table', 'items', 'total', 'note', 'name', 'status', 'updated', 'servedAt', 'cid'],
   Calls: ['id', 'created', 'table', 'type', 'done', 'doneAt'],
   Settings: ['key', 'value']
 };
@@ -579,8 +595,14 @@ function ss_() {
   if (!id) throw new Error('ยังไม่ได้รัน setup()');
   return SpreadsheetApp.openById(id);
 }
+var headerChecked_ = {};
 function sh_(name) {
   var s = ss_().getSheetByName(name);
+  if (s && !headerChecked_[name]) {
+    headerChecked_[name] = true;
+    var w = SHEETS[name].length;
+    if (String(s.getRange(1, w).getValues()[0][0]) !== SHEETS[name][w - 1]) s.getRange(1, 1, 1, w).setValues([SHEETS[name]]);
+  }
   if (!s) {
     s = ss_().insertSheet(name);
     s.getRange(1, 1, s.getMaxRows(), SHEETS[name].length).setNumberFormat('@'); // keep "0812..." / ISO dates as text
@@ -609,7 +631,7 @@ function parseOrder_(o) {
   o.id = String(o.id); o.table = String(o.table); o.no = Number(o.no);
   o.created = iso_(o.created); o.updated = iso_(o.updated); o.servedAt = o.servedAt ? iso_(o.servedAt) : '';
   try { o.items = JSON.parse(o.items || '[]'); } catch (x) { o.items = []; }
-  o.total = Number(o.total) || 0; o.note = String(o.note || ''); o.name = String(o.name || '');
+  o.total = Number(o.total) || 0; o.note = String(o.note || ''); o.name = String(o.name || ''); o.cid = String(o.cid || '');
   return o;
 }
 function iso_(v) { return v instanceof Date ? v.toISOString() : String(v || ''); }
@@ -627,17 +649,17 @@ function SheetStore_() {
     },
     saveSettings: function (obj) {
       var s = sh_('Settings'), n = s.getLastRow();
-      if (n > 1) s.getRange(2, 1, n - 1, 2).clearContent();
       var rows = Object.keys(obj).map(function (k) { return [k, obj[k]]; });
       if (rows.length) s.getRange(2, 1, rows.length, 2).setValues(rows);
+      if (n - 1 > rows.length) s.getRange(2 + rows.length, 1, n - 1 - rows.length, 2).clearContent();
     },
     getMenu: function () {
       return readRows_('Menu').filter(function (m) { return m.id; }).map(function (m) { m.updated = iso_(m.updated); return m; });
     },
     saveMenu: function (list) {
       var s = sh_('Menu'), n = s.getLastRow(), w = SHEETS.Menu.length;
-      if (n > 1) s.getRange(2, 1, n - 1, w).clearContent();
       if (list.length) s.getRange(2, 1, list.length, w).setValues(list.map(function (m) { return toRow_('Menu', m); }));
+      if (n - 1 > list.length) s.getRange(2 + list.length, 1, n - 1 - list.length, w).clearContent();
     },
     nextOrderNo: function (day) {
       var p = PropertiesService.getScriptProperties();
@@ -675,9 +697,10 @@ function SheetStore_() {
           var o = {}; SHEETS.Orders.forEach(function (c, j) { o[c] = vals[i][j]; });
           if (!o.id) continue;
           o = parseOrder_(o);
+          if (isNaN(new Date(o.created).getTime())) continue; // hand-edited / broken row
           // Rows are *mostly* in time order (the demo top-up appends a little late), so only stop
           // after a long run of older rows instead of at the first one.
-          if (new Date(o.created).getTime() < sinceMs) { if (++oldRun >= 60) { stop = true; break; } continue; }
+          if (new Date(o.created).getTime() < sinceMs) { if (++oldRun >= 200) { stop = true; break; } continue; }
           oldRun = 0;
           out.push(o);
         }
@@ -792,7 +815,7 @@ function demoTick() {
   try {
     var props = PropertiesService.getScriptProperties(), now = Date.now();
     var last = Number(props.getProperty('DEMO_LAST_TICK')) || now - 3600000;
-    if (now - last > 3 * 864e5) last = now - 3 * 864e5; // after a long pause, back-fill at most 3 days
+    if (now - last > 6 * 3600000) last = now - 6 * 3600000; // after a pause, back-fill at most 6 h (keeps the sheet nearly time-ordered)
     var store = SheetStore_(), have = {};
     store.getRecentOrders(last - 3600000).forEach(function (o) { have[o.id] = 1; }); // idempotent: never add a sample order twice
     var orders = QRCore.demoOrdersBetween(last, now).filter(function (o) { return !have[o.id]; });

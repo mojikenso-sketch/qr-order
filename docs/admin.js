@@ -170,23 +170,32 @@
     api('setStatus', { id: id, status: st }).then(function () {
       QR.toast(st === 'cancelled' ? 'ยกเลิกออเดอร์แล้ว' : 'อัปเดตเป็น "' + QR.STATUS_TH[st] + '"', 'ok');
       loadLive(); if (st === 'paid' || st === 'cancelled') loadDash();
-    }).catch(function (e) { if (btn) btn.disabled = false; err(e); });
+    }).catch(function (e) { if (btn) btn.disabled = false; err(e); if (e.code === 'STALE') loadLive(); });
   }
 
   /* ================= analytics ================= */
   function today() { return QRCore.dayKey(new Date()); }
-  function setRange(r) {
+  function rangeDates(r) {
     var t = today(), from = t, to = t;
     if (r === 'yesterday') { from = to = QRCore.addDays(t, -1); }
     else if (r === '7') from = QRCore.addDays(t, -6);
     else if (r === '30') from = QRCore.addDays(t, -29);
     else if (r === 'month') from = t.slice(0, 8) + '01';
+    return { from: from, to: to };
+  }
+  function setRange(r) {
+    var rd = rangeDates(r), from = rd.from, to = rd.to;
     S.range = r; S.from = from; S.to = to;
     $$('[data-range]').forEach(function (b) { b.classList.toggle('active', b.dataset.range === r); });
     $('#dFrom').value = from; $('#dTo').value = to;
     loadDash();
   }
   function loadDash() {
+    // a preset range ("today", "7 days"...) follows the calendar, so a page left open past midnight moves on
+    if (S.range && S.range !== 'custom') {
+      var rd = rangeDates(S.range);
+      if (rd.from !== S.from || rd.to !== S.to) { S.from = rd.from; S.to = rd.to; $('#dFrom').value = rd.from; $('#dTo').value = rd.to; }
+    }
     $('#kpis').innerHTML = '<div class="spinner" style="grid-column:1/-1"></div>';
     return api('dashboard', { from: S.from, to: S.to }).then(function (d) { S.dash = d; renderDash(d); }).catch(err);
   }
@@ -549,7 +558,7 @@
   $('#btnLogout').addEventListener('click', function () { logout(false); });
   $('#btnSound').addEventListener('click', function () { S.sound = !S.sound; try { localStorage.setItem('qro_sound', S.sound ? '1' : '0'); } catch (e) {} renderSound(); if (S.sound) beep(); });
   $('#demoLogin').addEventListener('click', function () { tryLogin('demo'); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && QR.getToken()) loadLive(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && (QR.getToken() || QR.CFG.OPEN_ADMIN)) loadLive(); });
 
   /* ================= boot ================= */
   fillIcons(document);

@@ -88,3 +88,19 @@ console.log('ALL TESTS PASS');
   assert.ok(whole.length > 20, 'a day has orders: ' + whole.length);
 }
 console.log('EXTRA TESTS PASS');
+// --- review fixes ---
+{
+  const st4 = mem(); const K4 = C.handle(st4, 'getSettings', {}, { admin: true }).tableTokens; const A4 = { admin: true };
+  const t0 = new Date('2026-11-14T05:00:00Z'), at = m => new Date(t0.getTime() + m * 60000);
+  const o = C.handle(st4, 'placeOrder', { table: '2', k: K4[2], items: [{ id: 'm1', qty: 1 }], cid: 'x1' }, { now: t0 });
+  assert.strictEqual(C.handle(st4, 'placeOrder', { table: '2', k: K4[2], items: [{ id: 'm1', qty: 1 }], cid: 'x1' }, { now: at(1) }).id, o.id, 'retry returns same order');
+  assert.notStrictEqual(C.handle(st4, 'placeOrder', { table: '2', k: K4[2], items: [{ id: 'm1', qty: 1 }], cid: 'x2' }, { now: at(1) }).id, o.id, 'new cid = new order');
+  C.handle(st4, 'setStatus', { id: o.id, status: 'paid' }, Object.assign({ now: at(2) }, A4));
+  assert.throws(() => C.handle(st4, 'setStatus', { id: o.id, status: 'cooking' }, Object.assign({ now: at(3) }, A4)), /ไปแล้ว/, 'no rollback from paid');
+  assert.strictEqual(C.handle(st4, 'setStatus', { id: o.id, status: 'paid' }, Object.assign({ now: at(3) }, A4)).status, 'paid', 'same status is a no-op');
+  assert.strictEqual(C.handle(st4, 'setStatus', { id: o.id, status: 'cancelled' }, Object.assign({ now: at(4) }, A4)).status, 'cancelled', 'void after paid allowed');
+  const c1 = C.handle(st4, 'callStaff', { table: '2', k: K4[2], type: 'bill' }, { now: t0 });
+  const c2 = C.handle(st4, 'callStaff', { table: '2', k: K4[2], type: 'bill' }, { now: at(9 * 60) });
+  assert.ok(!c2.already && c2.id !== c1.id, 'a call older than 8h no longer blocks a new one');
+}
+console.log('REVIEW TESTS PASS');

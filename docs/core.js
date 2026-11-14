@@ -97,6 +97,13 @@ var QRCore = (function () {
     var s = settings(store);
     if (!s.accepting) throw fail('ขณะนี้ร้านปิดรับออเดอร์ชั่วคราว', 'CLOSED');
     var table = validTable(s, p.table, p.k);
+    // Retry-safe: the phone sends the same cid when it re-submits after a timeout, so we return the order
+    // that was already written instead of creating a duplicate.
+    var cid = str(p.cid, 40);
+    if (cid) {
+      var dup = store.getRecentOrders(now.getTime() - 2 * 3600000).filter(function (o) { return o.cid === cid && o.table === table; })[0];
+      if (dup) return publicOrder(dup);
+    }
     var byId = {};
     store.getMenu().map(normMenu).forEach(function (m) { byId[m.id] = m; });
     var lines = (p.items || []).slice(0, 60);
@@ -113,7 +120,7 @@ var QRCore = (function () {
     var iso = now.toISOString();
     var order = {
       id: uid('o'), no: store.nextOrderNo(dayKey(now)), created: iso, table: table, items: items, total: total,
-      note: str(p.note, 200), name: str(p.name, 40), status: 'new', updated: iso, servedAt: ''
+      note: str(p.note, 200), name: str(p.name, 40), status: 'new', updated: iso, servedAt: '', cid: cid
     };
     store.addOrder(order);
     return publicOrder(order);
@@ -146,7 +153,8 @@ var QRCore = (function () {
     var s = settings(store);
     var table = validTable(s, p.table, p.k);
     var type = ({ staff: 1, bill: 1, water: 1 })[p.type] ? p.type : 'staff';
-    var open = store.getCalls().filter(function (c) { return c.table === table && c.type === type && !bool(c.done); });
+    var since = now.getTime() - 8 * 3600000;
+    var open = store.getCalls().filter(function (c) { return c.table === table && c.type === type && !bool(c.done) && new Date(c.created).getTime() > since; });
     if (open.length) return { id: open[0].id, already: true };
     var c = { id: uid('c'), created: now.toISOString(), table: table, type: type, done: false, doneAt: '' };
     store.addCall(c);
@@ -174,9 +182,17 @@ var QRCore = (function () {
   function setStatus(store, p, now) {
     now = now || new Date();
     if (STATUSES.indexOf(p.status) < 0) throw fail('สถานะไม่ถูกต้อง');
+    var id = str(p.id, 40);
+    var cur = store.getRecentOrders(now.getTime() - 14 * 864e5).filter(function (o) { return o.id === id; })[0];
+    if (!cur) throw fail('ไม่พบออเดอร์');
+    var NEXT = { 'new': ['cooking', 'served', 'paid', 'cancelled'], cooking: ['served', 'paid', 'cancelled'], served: ['paid', 'cancelled'], paid: ['cancelled'], cancelled: [] };
+    if (cur.status === p.status) return publicOrder(cur);
+    if ((NEXT[cur.status] || []).indexOf(p.status) < 0) {
+      throw fail('ออเดอร์ #' + cur.no + ' ถูกเปลี่ยนเป็น "' + ({ 'new': 'ใหม่', cooking: 'กำลังทำ', served: 'เสิร์ฟแล้ว', paid: 'ชำระแล้ว', cancelled: 'ยกเลิก' })[cur.status] + '" ไปแล้ว', 'STALE');
+    }
     var patch = { status: p.status, updated: now.toISOString() };
-    if (p.status === 'served') patch.servedAt = now.toISOString();
-    var o = store.updateOrder(str(p.id, 40), patch);
+    if (p.status === 'served' || (p.status === 'paid' && !cur.servedAt)) patch.servedAt = now.toISOString();
+    var o = store.updateOrder(id, patch);
     if (!o) throw fail('ไม่พบออเดอร์');
     return publicOrder(o);
   }

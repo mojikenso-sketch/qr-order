@@ -24,7 +24,11 @@
     saveSettings: function (s) { lsSet('settings', s); },
     getMenu: function () { return lsGet('menu', []); },
     saveMenu: function (l) { lsSet('menu', l); },
-    nextOrderNo: function (day) { var n = lsGet('nos', {}); n[day] = (n[day] || 0) + 1; lsSet('nos', n); return n[day]; },
+    nextOrderNo: function (day) {
+      var n = lsGet('nos', {}), max = 0;
+      lsGet('orders', []).forEach(function (o) { if (QRCore.dayKey(o.created) === day && o.no > max) max = o.no; });
+      n[day] = Math.max(n[day] || 0, max) + 1; lsSet('nos', n); return n[day];
+    },
     addOrder: function (o) { var l = lsGet('orders', []); l.push(o); lsSet('orders', l); },
     updateOrder: function (id, patch) {
       var l = lsGet('orders', []), hit = null;
