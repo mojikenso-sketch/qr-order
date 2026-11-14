@@ -290,6 +290,10 @@ function setup() {
 
 /* Fills 30 days of sample orders (replaces the Orders sheet). */
 function seedDemoData() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try { seedDemoData_(); } finally { lock.releaseLock(); }
+}
+function seedDemoData_() {
   var now = new Date();
   var orders = QRCore.demoOrders(now, 30);
   var s = sh_('Orders'), n = s.getLastRow(), w = SHEETS.Orders.length;
@@ -347,8 +351,34 @@ function demoTick() {
 function installDemoTrigger() {
   removeDemoTrigger();
   ScriptApp.newTrigger('demoTick').timeBased().everyHours(1).create();
+  // every night just after midnight (Thai time) the demo shop starts over with fresh sample data
+  ScriptApp.newTrigger('demoDailyReset').timeBased().atHour(0).nearMinute(5).everyDays(1).inTimezone('Asia/Bangkok').create();
   demoTick();
 }
 function removeDemoTrigger() {
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'demoTick') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === 'demoTick' || f === 'demoDailyReset') ScriptApp.deleteTrigger(t);
+  });
+}
+
+/* Daily fresh start for the demo shop: wipes what visitors did (orders, staff calls, menu edits, uploaded photos,
+ * settings changes) and re-seeds 30 days of sample sales. Table secrets and the number of tables are kept,
+ * so printed table QR codes keep working. */
+function demoDailyReset() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var store = SheetStore_(), cur = QRCore.settings(store);
+    // staff calls
+    var c = sh_('Calls'), n = c.getLastRow();
+    if (n > 1) c.getRange(2, 1, n - 1, SHEETS.Calls.length).clearContent();
+    // photos visitors uploaded (only our own image folder; recoverable from Drive trash for 30 days)
+    var fid = PropertiesService.getScriptProperties().getProperty('IMG_FOLDER_ID');
+    if (fid) { try { var it = DriveApp.getFolderById(fid).getFiles(); while (it.hasNext()) it.next().setTrashed(true); } catch (x) {} }
+    // settings back to the demo shop, keeping tables + table secrets
+    var d = QRCore.DEFAULT_SETTINGS;
+    store.saveSettings({ shopName: 'ร้านก๋วยเตี๋ยวตัวอย่าง', tables: cur.tables, promptpay: '', accepting: true, notice: '',
+      categories: d.categories, admins: cur.admins, tableTokens: JSON.stringify(cur.tableTokens || {}) });
+  } finally { lock.releaseLock(); }
+  seedDemoData(); // orders + menu (takes its own care of numbering and the hourly top-up marker)
 }

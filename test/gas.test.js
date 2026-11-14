@@ -44,7 +44,7 @@ const ctx = {
   ContentService: { createTextOutput: t => ({ setMimeType: () => JSON.parse(t), t }), MimeType: { JSON: 'json' } },
   DriveApp: {
     getRootFolder: () => ({}),
-    getFolderById: id => ({ getId: () => id }),
+    getFolderById: id => ({ getId: () => id, getFiles: () => { const f = ['up1', 'up2']; let i = 0; return { hasNext: () => i < f.length, next: () => { const id2 = f[i++]; return { setTrashed: () => trashed.push(id2) }; } }; } }),
     createFolder: () => ({ getId: () => 'FOLDER', createFile: () => ({ getId: () => 'NEWFILE', setSharing() {} }) }),
     getFileById: id => ({ getParents: () => { let done = false; return { hasNext: () => !done, next: () => { done = true; return { getId: () => (id.startsWith('ours') ? 'FOLDER' : 'OTHER') }; } }; },
       setTrashed: () => trashed.push(id) }),
@@ -52,7 +52,7 @@ const ctx = {
   },
   UrlFetchApp: { fetch: () => ({ getResponseCode: () => 500, getContentText: () => '{}' }) },
   ScriptApp: { getProjectTriggers: () => triggers.slice(), deleteTrigger: t => triggers.splice(triggers.indexOf(t), 1),
-    newTrigger: fn => ({ timeBased: () => ({ everyHours: () => ({ create: () => triggers.push({ getHandlerFunction: () => fn }) }) }) }) },
+    newTrigger: fn => { const t = { create: () => triggers.push({ getHandlerFunction: () => fn }) }; const tb = { everyHours: () => t, atHour: () => tb, nearMinute: () => tb, everyDays: () => tb, inTimezone: () => t }; return { timeBased: () => tb }; } },
   Logger: { log: () => {} }
 };
 vm.createContext(ctx);
@@ -86,7 +86,7 @@ props.DEMO_LAST_TICK = String(Date.now() - 24 * 3600e3);
 }
 const beforeTick = orders.getLastRow() - 1;
 ctx.installDemoTrigger();
-assert.strictEqual(triggers.length, 1, 'one hourly trigger');
+assert.deepStrictEqual(triggers.map(t => t.getHandlerFunction()).sort(), ['demoDailyReset', 'demoTick'], 'hourly + daily triggers');
 const live = post('live'); assert.ok(live.ok && live.data.orders.some(x => x.id === o.data.id), 'real order still on board after demo rows appended');
 const rec = post('recentOrders'); assert.ok(rec.data.some(x => x.id === o.data.id));
 const d = post('dashboard', { from: todayKey, to: todayKey }); assert.ok(d.ok && d.data.kpi.orders > 0);
@@ -138,6 +138,21 @@ const before = post('menu').data.menu.length;
 post('setAvailable', { id: 'm1', available: false });
 assert.strictEqual(post('menu').data.menu.length, before);
 post('setAvailable', { id: 'm1', available: true });
+// daily fresh start: visitor changes gone, table QR secrets kept
+post('saveSettings', { settings: { shopName: 'Visitor renamed', tables: 10, accepting: false, notice: 'hi', promptpay: '0899999999' } });
+post('setAvailable', { id: 'm3', available: false });
+post('callStaff', { table: '4', k: K[4], type: 'staff' });
+trashed.length = 0;
+ctx.demoDailyReset();
+const m = post('me').data.settings;
+assert.strictEqual(m.shopName, 'ร้านก๋วยเตี๋ยวตัวอย่าง'); assert.strictEqual(m.accepting, true); assert.strictEqual(m.notice, ''); assert.strictEqual(m.promptpay, '');
+assert.deepStrictEqual(m.tableTokens, K, 'printed QR codes still valid');
+const menuNow = post('menuAll').data; assert.strictEqual(menuNow.length, 13); assert.ok(menuNow.every(x => x.available && x.image.indexOf('img/menu/') === 0));
+assert.strictEqual(post('live').data.calls.length, 0, 'calls cleared');
+assert.ok(!post('recentOrders').data.some(x => x.id === o.data.id), 'visitor orders wiped');
+assert.ok(orders.rows.slice(1).filter(r => r && r[0]).length > 800, 'fresh 30 days seeded');
+assert.deepStrictEqual(trashed, ['up1', 'up2'], 'uploaded photos trashed');
+assert.ok(post('placeOrder', { table: '4', k: K[4], items: [{ id: 'm1', qty: 1 }] }).ok, 'old table QR still orders');
 console.log('GAS TESTS PASS (' + seeded + ' seeded, ' + (ids.length - beforeTick) + ' added by demoTick)');
 const expectAdded = ctx.QRCore.demoOrdersBetween(Date.now() - 6 * 3600e3 - 60e3, Date.now()).length; // back-fill is capped at 6 h
 assert.ok(Math.abs((ids.length - beforeTick) - expectAdded) <= 1, 'demoTick added ' + (ids.length - beforeTick) + ' expected ~' + expectAdded);
