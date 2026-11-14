@@ -8,16 +8,16 @@
   function lsGet(k, d) { try { var v = localStorage.getItem(LS + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(LS + k, JSON.stringify(v)); } catch (e) { console.warn('storage full', e); } }
   function ensureDemo() {
-    if (lsGet('ver', 0) === 2) return;
+    if (lsGet('ver', 0) === 3) return;
     var now = new Date();
     lsSet('menu', QRCore.demoMenu());
-    lsSet('orders', QRCore.demoOrders(now, 30));
+    lsSet('orders', QRCore.demoOrders(now, 30, true));
     lsSet('calls', []);
     var s = {}; for (var k in QRCore.DEFAULT_SETTINGS) s[k] = QRCore.DEFAULT_SETTINGS[k];
     s.shopName = 'ร้านก๋วยเตี๋ยวตัวอย่าง'; s.promptpay = '0812345678';
     lsSet('settings', s);
     lsSet('nos', {});
-    lsSet('ver', 2);
+    lsSet('ver', 3);
   }
   var demoStore = {
     getSettings: function () { return lsGet('settings', {}); },

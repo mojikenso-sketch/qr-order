@@ -87,14 +87,32 @@
     var b = $('#btnSound');
     b.innerHTML = icon(S.sound ? 'sound' : 'mute', 18) + '<span class="hide-sm">' + (S.sound ? 'เสียงเตือนเปิด' : 'เสียงเตือนปิด') + '</span>';
     b.setAttribute('aria-pressed', S.sound);
+    updateSoundHint();
   }
 
   /* ================= live orders ================= */
+  // Browsers keep audio muted until the person taps the page once, so the first order could beep silently.
+  // We unlock audio on the first tap/key press and show a hint until that has happened.
   var audioCtx;
+  function audioReady() { return !!audioCtx && audioCtx.state === 'running'; }
+  function unlockAudio() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state !== 'running') audioCtx.resume().then(updateSoundHint, updateSoundHint);
+    } catch (e) {}
+    updateSoundHint();
+  }
+  function updateSoundHint() {
+    var h = $('#soundHint');
+    if (h) h.classList.toggle('hidden', !S.sound || audioReady());
+  }
+  document.addEventListener('pointerdown', unlockAudio, { passive: true });
+  document.addEventListener('keydown', unlockAudio);
   function beep() {
     if (!S.sound) return;
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state !== 'running') { audioCtx.resume(); updateSoundHint(); }
       [0, 0.18, 0.36].forEach(function (t, i) {
         var o = audioCtx.createOscillator(), g = audioCtx.createGain();
         o.frequency.value = [880, 1175, 1568][i]; o.type = 'sine';
@@ -230,7 +248,7 @@
     chart('chDay', {
       type: multi ? 'line' : 'bar',
       data: { labels: d.daily.map(function (x) { return new Date(x.date + 'T00:00:00+07:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' }); }),
-        datasets: [{ label: 'ยอดขาย (บาท)', data: d.daily.map(function (x) { return x.sales; }), borderColor: '#DC2626', backgroundColor: multi ? 'rgba(220,38,38,.12)' : '#DC2626', fill: true, tension: .35, pointRadius: d.daily.length > 40 ? 0 : 3, borderRadius: 6 }] },
+        datasets: [{ label: 'ยอดขาย (บาท)', data: d.daily.map(function (x) { return x.sales; }), borderColor: '#DC2626', backgroundColor: multi ? 'rgba(220,38,38,.12)' : '#DC2626', fill: true, tension: .3, cubicInterpolationMode: 'monotone', pointRadius: d.daily.length > 40 ? 0 : 3, borderRadius: 6 }] },
       options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return baht(c.raw) + ' บาท · ' + d.daily[c.dataIndex].orders + ' ออเดอร์'; } } } },
         scales: { y: { beginAtZero: true, grid: { color: '#F5EDE9' } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } } } }
     });

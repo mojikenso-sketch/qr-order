@@ -125,7 +125,13 @@ var QRCore = (function () {
     var s = settings(store);
     var table = validTable(s, p.table, p.k);
     var since = now.getTime() - 8 * 3600000;
-    var list = store.getRecentOrders(since).filter(function (o) { return o.table === table && o.status !== 'cancelled'; });
+    // Only the current group's orders: everything still unpaid, plus orders paid in the last 15 minutes
+    // (so a group that just paid sees "ชำระแล้ว", but the next group at this table starts with a clean list).
+    var paidCutoff = now.getTime() - 15 * 60000;
+    var list = store.getRecentOrders(since).filter(function (o) {
+      if (o.table !== table || o.status === 'cancelled') return false;
+      return o.status !== 'paid' || new Date(o.updated || o.created).getTime() > paidCutoff;
+    });
     var unpaid = list.filter(function (o) { return o.status !== 'paid'; });
     var calls = store.getCalls().filter(function (c) { return c.table === table && !bool(c.done) && new Date(c.created).getTime() > since; });
     return {
@@ -390,50 +396,74 @@ var QRCore = (function () {
     });
   }
 
-  // 30 days of plausible orders with lunch/dinner peaks
-  function demoOrders(now, days) {
-    days = days || 30;
-    var menu = demoMenu(), out = [], seed = 42;
+  // One day of plausible orders (lunch/dinner peaks, busier weekends). Deterministic per date,
+  // so the hourly demo top-up and a full re-seed agree on what that day looked like.
+  function demoDay(key) {
+    var menu = demoMenu(), out = [], seed = 7;
+    for (var q = 0; q < key.length; q++) seed = (seed * 31 + key.charCodeAt(q)) % 233280;
     function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
     var weights = [9, 8, 5, 4, 2, 3, 3, 10, 6, 4, 3, 3, 0.4];
     var wsum = weights.reduce(function (a, b) { return a + b; }, 0);
     function pick() { var r = rnd() * wsum; for (var i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) return menu[i]; } return menu[0]; }
     var hourW = { 10: 2, 11: 7, 12: 10, 13: 6, 14: 2, 15: 2, 16: 3, 17: 6, 18: 9, 19: 7, 20: 3 };
     var hours = Object.keys(hourW), hsum = 0; hours.forEach(function (h) { hsum += hourW[h]; });
-    var today = dayKey(now);
-    for (var d = days - 1; d >= 0; d--) {
-      var key = addDays(today, -d), dow = new Date(key + 'T00:00:00Z').getUTCDay();
-      var count = Math.round((dow === 0 || dow === 6 ? 52 : 38) * (0.8 + rnd() * 0.4));
-      var no = 0;
-      for (var c = 0; c < count; c++) {
-        var r = rnd() * hsum, hr = 12;
-        for (var j = 0; j < hours.length; j++) { r -= hourW[hours[j]]; if (r <= 0) { hr = +hours[j]; break; } }
-        var t = new Date(key + 'T' + pad(hr) + ':' + pad(Math.floor(rnd() * 60)) + ':00+07:00');
-        if (t > now) continue;
-        var n = 1 + Math.floor(rnd() * 4), items = [], byId = {};
-        for (var k = 0; k < n; k++) {
-          var m = pick();
-          if (byId[m.id]) { byId[m.id].qty++; continue; }
-          byId[m.id] = { id: m.id, name: m.name, price: m.price, qty: 1, note: '', cat: m.category };
-          items.push(byId[m.id]);
-        }
-        var total = items.reduce(function (a, i) { return a + i.price * i.qty; }, 0);
-        var age = (now - t) / 60000;
-        var status = age > 90 ? 'paid' : age > 25 ? 'served' : age > 8 ? 'cooking' : 'new';
-        if (rnd() < 0.02) status = 'cancelled';
-        var served = (status === 'paid' || status === 'served') ? new Date(t.getTime() + (8 + rnd() * 14) * 60000).toISOString() : '';
-        out.push({
-          id: 'o' + key.replace(/-/g, '') + pad(c), no: ++no, created: t.toISOString(), table: String(1 + Math.floor(rnd() * 10)),
-          items: items, total: total, note: '', name: '', status: status, updated: t.toISOString(), servedAt: served
-        });
+    var dow = new Date(key + 'T00:00:00Z').getUTCDay();
+    var count = Math.round((dow === 0 || dow === 6 ? 52 : 38) * (0.8 + rnd() * 0.4));
+    for (var c = 0; c < count; c++) {
+      var r = rnd() * hsum, hr = 12;
+      for (var j = 0; j < hours.length; j++) { r -= hourW[hours[j]]; if (r <= 0) { hr = +hours[j]; break; } }
+      var t = new Date(key + 'T' + pad(hr) + ':' + pad(Math.floor(rnd() * 60)) + ':' + pad(Math.floor(rnd() * 60)) + '+07:00');
+      var n = 1 + Math.floor(rnd() * 4), items = [], byId = {};
+      for (var k = 0; k < n; k++) {
+        var m = pick();
+        if (byId[m.id]) { byId[m.id].qty++; continue; }
+        byId[m.id] = { id: m.id, name: m.name, price: m.price, qty: 1, note: '', cat: m.category };
+        items.push(byId[m.id]);
       }
+      out.push({ id: 'd' + key.replace(/-/g, '') + pad(c), created: t, items: items,
+        total: items.reduce(function (a, i) { return a + i.price * i.qty; }, 0),
+        table: String(1 + Math.floor(rnd() * 10)), cancelled: rnd() < 0.02, serveMin: 8 + rnd() * 14 });
     }
-    out.sort(function (a, b) { return a.created < b.created ? -1 : 1; });
+    out.sort(function (a, b) { return a.created - b.created; });
+    out.forEach(function (o, i) { o.no = i + 1; });
+    return out;
+  }
+  function demoRow(o, status) {
+    var iso = o.created.toISOString();
+    var served = (status === 'paid' || status === 'served') ? new Date(o.created.getTime() + o.serveMin * 60000).toISOString() : '';
+    return { id: o.id, no: o.no, created: iso, table: o.table, items: o.items, total: o.total, note: '', name: '',
+      status: status, updated: served || iso, servedAt: served };
+  }
+  // Sample history up to 'now'. liveBoard=true (browser try-it mode) leaves the last ~90 min in progress
+  // so the order board has something on it; otherwise everything is already paid (nothing goes stale on the board).
+  function demoOrders(now, days, liveBoard) {
+    days = days || 30;
+    var out = [], today = dayKey(now);
+    for (var d = days - 1; d >= 0; d--) {
+      demoDay(addDays(today, -d)).forEach(function (o) {
+        if (o.created > now) return;
+        var age = (now - o.created) / 60000, st = 'paid';
+        if (liveBoard) st = age > 90 ? 'paid' : age > 25 ? 'served' : age > 8 ? 'cooking' : 'new';
+        out.push(demoRow(o, o.cancelled ? 'cancelled' : st));
+      });
+    }
+    return out;
+  }
+  // Sample orders created in (fromMs, toMs] - used by the hourly top-up so the demo shop keeps "trading".
+  function demoOrdersBetween(fromMs, toMs) {
+    var out = [], from = new Date(fromMs), to = new Date(toMs);
+    var k = dayKey(from), last = dayKey(to), guard = 0;
+    while (k <= last && guard++ < 40) {
+      demoDay(k).forEach(function (o) {
+        if (o.created.getTime() > fromMs && o.created.getTime() <= toMs) out.push(demoRow(o, o.cancelled ? 'cancelled' : 'paid'));
+      });
+      k = addDays(k, 1);
+    }
     return out;
   }
 
   return {
-    handle: handle, settings: settings, dashboard: dashboard, demoMenu: demoMenu, demoOrders: demoOrders,
+    handle: handle, settings: settings, dashboard: dashboard, demoMenu: demoMenu, demoOrders: demoOrders, demoOrdersBetween: demoOrdersBetween,
     dayKey: dayKey, addDays: addDays, DEFAULT_SETTINGS: DEFAULT_SETTINGS, STATUSES: STATUSES
   };
 })();
@@ -488,7 +518,13 @@ function doPost(e) {
       if (!ctx.admin) return json_({ ok: false, code: 'AUTH', error: 'กรุณาเข้าสู่ระบบ' });
       data = uploadImage_(p);
     } else {
-      data = QRCore.handle(SheetStore_(), action, p, ctx);
+      var store = SheetStore_(), oldImg = '';
+      if (ctx.admin && (action === 'saveMenuItem' || action === 'deleteMenuItem')) {
+        var id = action === 'deleteMenuItem' ? p.id : (p.item && p.item.id);
+        store.getMenu().forEach(function (m) { if (m.id === id) oldImg = String(m.image || ''); });
+      }
+      data = QRCore.handle(store, action, p, ctx);
+      if (oldImg && (action === 'deleteMenuItem' || String((data && data.image) || '') !== oldImg)) trashMenuImage_(oldImg);
     }
     return json_({ ok: true, data: data });
   } catch (err) {
@@ -605,7 +641,10 @@ function SheetStore_() {
     },
     nextOrderNo: function (day) {
       var p = PropertiesService.getScriptProperties();
-      var k = 'NO_' + day, v = (Number(p.getProperty(k)) || 0) + 1;
+      var k = 'NO_' + day, maxNo = 0;
+      // Never reuse a number already on today's orders (sample data, manual sheet edits, a lost property).
+      this.getRecentOrders(new Date(day + 'T00:00:00+07:00').getTime()).forEach(function (o) { if (o.no > maxNo) maxNo = o.no; });
+      var v = Math.max(Number(p.getProperty(k)) || 0, maxNo) + 1;
       p.setProperty(k, String(v));
       if (v === 1) { // tidy old counters
         p.getKeys().forEach(function (x) { if (x.indexOf('NO_') === 0 && x < 'NO_' + QRCore.addDays(day, -3)) p.deleteProperty(x); });
@@ -627,7 +666,7 @@ function SheetStore_() {
     // Orders are appended in time order, so read from the bottom up.
     getRecentOrders: function (sinceMs) {
       var s = sh_('Orders'), n = s.getLastRow(), out = [], w = SHEETS.Orders.length;
-      var chunk = 400, end = n;
+      var chunk = 400, end = n, oldRun = 0;
       while (end >= 2) {
         var start = Math.max(2, end - chunk + 1);
         var vals = s.getRange(start, 1, end - start + 1, w).getValues();
@@ -636,13 +675,16 @@ function SheetStore_() {
           var o = {}; SHEETS.Orders.forEach(function (c, j) { o[c] = vals[i][j]; });
           if (!o.id) continue;
           o = parseOrder_(o);
-          if (new Date(o.created).getTime() < sinceMs) { stop = true; break; }
+          // Rows are *mostly* in time order (the demo top-up appends a little late), so only stop
+          // after a long run of older rows instead of at the first one.
+          if (new Date(o.created).getTime() < sinceMs) { if (++oldRun >= 60) { stop = true; break; } continue; }
+          oldRun = 0;
           out.push(o);
         }
         if (stop) break;
         end = start - 1;
       }
-      return out.reverse();
+      return out.sort(function (a, b) { return a.created < b.created ? -1 : a.created > b.created ? 1 : 0; });
     },
     getOrdersBetween: function (fromKey, toKey) {
       var since = new Date(fromKey + 'T00:00:00+07:00').getTime();
@@ -681,6 +723,17 @@ function uploadImage_(p) {
   return { url: 'https://lh3.googleusercontent.com/d/' + file.getId() + '=w600' };
 }
 
+// Moves an uploaded menu photo to the Drive trash (recoverable for 30 days) - only files in our own image folder.
+function trashMenuImage_(url) {
+  var m = /lh3\.googleusercontent\.com\/d\/([\w-]+)/.exec(url);
+  var fid = PropertiesService.getScriptProperties().getProperty('IMG_FOLDER_ID');
+  if (!m || !fid) return;
+  try {
+    var f = DriveApp.getFileById(m[1]), parents = f.getParents();
+    while (parents.hasNext()) if (parents.next().getId() === fid) { f.setTrashed(true); return; }
+  } catch (x) {}
+}
+
 /* ---------------- setup (run by hand in the editor) ---------------- */
 function setup() {
   var props = PropertiesService.getScriptProperties();
@@ -701,7 +754,8 @@ function setup() {
 
 /* Fills 30 days of sample orders (replaces the Orders sheet). */
 function seedDemoData() {
-  var orders = QRCore.demoOrders(new Date(), 30);
+  var now = new Date();
+  var orders = QRCore.demoOrders(now, 30);
   var s = sh_('Orders'), n = s.getLastRow(), w = SHEETS.Orders.length;
   if (n > 1) s.getRange(2, 1, n - 1, w).clearContent();
   var need = orders.length + 1 + 200 - s.getMaxRows();
@@ -712,6 +766,7 @@ function seedDemoData() {
   var today = QRCore.dayKey(new Date()), maxNo = 0;
   orders.forEach(function (o) { if (QRCore.dayKey(o.created) === today && o.no > maxNo) maxNo = o.no; });
   PropertiesService.getScriptProperties().setProperty('NO_' + today, String(maxNo));
+  PropertiesService.getScriptProperties().setProperty('DEMO_LAST_TICK', String(now.getTime()));
   var store = SheetStore_();
   store.saveMenu(QRCore.demoMenu());
   var st = store.getSettings();
@@ -725,4 +780,39 @@ function clearOrders() {
     var s = sh_(name), n = s.getLastRow();
     if (n > 1) s.deleteRows(2, n - 1);
   });
+}
+
+/* ---------------- demo shop: keep sample sales flowing ----------------
+ * installDemoTrigger()  - run once: every hour, demoTick() adds the sample orders that "happened" since the last run,
+ *                         so today's figures and the charts stay alive for prospects.
+ * removeDemoTrigger()   - run before using the system for a real shop (then clearOrders()).
+ */
+function demoTick() {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var props = PropertiesService.getScriptProperties(), now = Date.now();
+    var last = Number(props.getProperty('DEMO_LAST_TICK')) || now - 3600000;
+    if (now - last > 3 * 864e5) last = now - 3 * 864e5; // after a long pause, back-fill at most 3 days
+    var store = SheetStore_(), have = {};
+    store.getRecentOrders(last - 3600000).forEach(function (o) { have[o.id] = 1; }); // idempotent: never add a sample order twice
+    var orders = QRCore.demoOrdersBetween(last, now).filter(function (o) { return !have[o.id]; });
+    if (orders.length) {
+      var s = sh_('Orders'), w = SHEETS.Orders.length;
+      orders.forEach(function (o) { o.no = store.nextOrderNo(QRCore.dayKey(o.created)); });
+      var start = s.getLastRow() + 1, need = start + orders.length + 50 - s.getMaxRows();
+      if (need > 0) s.insertRowsAfter(s.getMaxRows(), need);
+      s.getRange(start, 1, orders.length, w).setNumberFormat('@')
+        .setValues(orders.map(function (o) { return toRow_('Orders', o); }));
+    }
+    props.setProperty('DEMO_LAST_TICK', String(now));
+    Logger.log('demoTick added ' + orders.length);
+  } finally { lock.releaseLock(); }
+}
+function installDemoTrigger() {
+  removeDemoTrigger();
+  ScriptApp.newTrigger('demoTick').timeBased().everyHours(1).create();
+  demoTick();
+}
+function removeDemoTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'demoTick') ScriptApp.deleteTrigger(t); });
 }

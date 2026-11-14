@@ -124,7 +124,13 @@ var QRCore = (function () {
     var s = settings(store);
     var table = validTable(s, p.table, p.k);
     var since = now.getTime() - 8 * 3600000;
-    var list = store.getRecentOrders(since).filter(function (o) { return o.table === table && o.status !== 'cancelled'; });
+    // Only the current group's orders: everything still unpaid, plus orders paid in the last 15 minutes
+    // (so a group that just paid sees "ชำระแล้ว", but the next group at this table starts with a clean list).
+    var paidCutoff = now.getTime() - 15 * 60000;
+    var list = store.getRecentOrders(since).filter(function (o) {
+      if (o.table !== table || o.status === 'cancelled') return false;
+      return o.status !== 'paid' || new Date(o.updated || o.created).getTime() > paidCutoff;
+    });
     var unpaid = list.filter(function (o) { return o.status !== 'paid'; });
     var calls = store.getCalls().filter(function (c) { return c.table === table && !bool(c.done) && new Date(c.created).getTime() > since; });
     return {
@@ -389,50 +395,74 @@ var QRCore = (function () {
     });
   }
 
-  // 30 days of plausible orders with lunch/dinner peaks
-  function demoOrders(now, days) {
-    days = days || 30;
-    var menu = demoMenu(), out = [], seed = 42;
+  // One day of plausible orders (lunch/dinner peaks, busier weekends). Deterministic per date,
+  // so the hourly demo top-up and a full re-seed agree on what that day looked like.
+  function demoDay(key) {
+    var menu = demoMenu(), out = [], seed = 7;
+    for (var q = 0; q < key.length; q++) seed = (seed * 31 + key.charCodeAt(q)) % 233280;
     function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
     var weights = [9, 8, 5, 4, 2, 3, 3, 10, 6, 4, 3, 3, 0.4];
     var wsum = weights.reduce(function (a, b) { return a + b; }, 0);
     function pick() { var r = rnd() * wsum; for (var i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) return menu[i]; } return menu[0]; }
     var hourW = { 10: 2, 11: 7, 12: 10, 13: 6, 14: 2, 15: 2, 16: 3, 17: 6, 18: 9, 19: 7, 20: 3 };
     var hours = Object.keys(hourW), hsum = 0; hours.forEach(function (h) { hsum += hourW[h]; });
-    var today = dayKey(now);
-    for (var d = days - 1; d >= 0; d--) {
-      var key = addDays(today, -d), dow = new Date(key + 'T00:00:00Z').getUTCDay();
-      var count = Math.round((dow === 0 || dow === 6 ? 52 : 38) * (0.8 + rnd() * 0.4));
-      var no = 0;
-      for (var c = 0; c < count; c++) {
-        var r = rnd() * hsum, hr = 12;
-        for (var j = 0; j < hours.length; j++) { r -= hourW[hours[j]]; if (r <= 0) { hr = +hours[j]; break; } }
-        var t = new Date(key + 'T' + pad(hr) + ':' + pad(Math.floor(rnd() * 60)) + ':00+07:00');
-        if (t > now) continue;
-        var n = 1 + Math.floor(rnd() * 4), items = [], byId = {};
-        for (var k = 0; k < n; k++) {
-          var m = pick();
-          if (byId[m.id]) { byId[m.id].qty++; continue; }
-          byId[m.id] = { id: m.id, name: m.name, price: m.price, qty: 1, note: '', cat: m.category };
-          items.push(byId[m.id]);
-        }
-        var total = items.reduce(function (a, i) { return a + i.price * i.qty; }, 0);
-        var age = (now - t) / 60000;
-        var status = age > 90 ? 'paid' : age > 25 ? 'served' : age > 8 ? 'cooking' : 'new';
-        if (rnd() < 0.02) status = 'cancelled';
-        var served = (status === 'paid' || status === 'served') ? new Date(t.getTime() + (8 + rnd() * 14) * 60000).toISOString() : '';
-        out.push({
-          id: 'o' + key.replace(/-/g, '') + pad(c), no: ++no, created: t.toISOString(), table: String(1 + Math.floor(rnd() * 10)),
-          items: items, total: total, note: '', name: '', status: status, updated: t.toISOString(), servedAt: served
-        });
+    var dow = new Date(key + 'T00:00:00Z').getUTCDay();
+    var count = Math.round((dow === 0 || dow === 6 ? 52 : 38) * (0.8 + rnd() * 0.4));
+    for (var c = 0; c < count; c++) {
+      var r = rnd() * hsum, hr = 12;
+      for (var j = 0; j < hours.length; j++) { r -= hourW[hours[j]]; if (r <= 0) { hr = +hours[j]; break; } }
+      var t = new Date(key + 'T' + pad(hr) + ':' + pad(Math.floor(rnd() * 60)) + ':' + pad(Math.floor(rnd() * 60)) + '+07:00');
+      var n = 1 + Math.floor(rnd() * 4), items = [], byId = {};
+      for (var k = 0; k < n; k++) {
+        var m = pick();
+        if (byId[m.id]) { byId[m.id].qty++; continue; }
+        byId[m.id] = { id: m.id, name: m.name, price: m.price, qty: 1, note: '', cat: m.category };
+        items.push(byId[m.id]);
       }
+      out.push({ id: 'd' + key.replace(/-/g, '') + pad(c), created: t, items: items,
+        total: items.reduce(function (a, i) { return a + i.price * i.qty; }, 0),
+        table: String(1 + Math.floor(rnd() * 10)), cancelled: rnd() < 0.02, serveMin: 8 + rnd() * 14 });
     }
-    out.sort(function (a, b) { return a.created < b.created ? -1 : 1; });
+    out.sort(function (a, b) { return a.created - b.created; });
+    out.forEach(function (o, i) { o.no = i + 1; });
+    return out;
+  }
+  function demoRow(o, status) {
+    var iso = o.created.toISOString();
+    var served = (status === 'paid' || status === 'served') ? new Date(o.created.getTime() + o.serveMin * 60000).toISOString() : '';
+    return { id: o.id, no: o.no, created: iso, table: o.table, items: o.items, total: o.total, note: '', name: '',
+      status: status, updated: served || iso, servedAt: served };
+  }
+  // Sample history up to 'now'. liveBoard=true (browser try-it mode) leaves the last ~90 min in progress
+  // so the order board has something on it; otherwise everything is already paid (nothing goes stale on the board).
+  function demoOrders(now, days, liveBoard) {
+    days = days || 30;
+    var out = [], today = dayKey(now);
+    for (var d = days - 1; d >= 0; d--) {
+      demoDay(addDays(today, -d)).forEach(function (o) {
+        if (o.created > now) return;
+        var age = (now - o.created) / 60000, st = 'paid';
+        if (liveBoard) st = age > 90 ? 'paid' : age > 25 ? 'served' : age > 8 ? 'cooking' : 'new';
+        out.push(demoRow(o, o.cancelled ? 'cancelled' : st));
+      });
+    }
+    return out;
+  }
+  // Sample orders created in (fromMs, toMs] - used by the hourly top-up so the demo shop keeps "trading".
+  function demoOrdersBetween(fromMs, toMs) {
+    var out = [], from = new Date(fromMs), to = new Date(toMs);
+    var k = dayKey(from), last = dayKey(to), guard = 0;
+    while (k <= last && guard++ < 40) {
+      demoDay(k).forEach(function (o) {
+        if (o.created.getTime() > fromMs && o.created.getTime() <= toMs) out.push(demoRow(o, o.cancelled ? 'cancelled' : 'paid'));
+      });
+      k = addDays(k, 1);
+    }
     return out;
   }
 
   return {
-    handle: handle, settings: settings, dashboard: dashboard, demoMenu: demoMenu, demoOrders: demoOrders,
+    handle: handle, settings: settings, dashboard: dashboard, demoMenu: demoMenu, demoOrders: demoOrders, demoOrdersBetween: demoOrdersBetween,
     dayKey: dayKey, addDays: addDays, DEFAULT_SETTINGS: DEFAULT_SETTINGS, STATUSES: STATUSES
   };
 })();

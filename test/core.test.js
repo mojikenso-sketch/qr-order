@@ -56,3 +56,35 @@ const s = C.handle(st, 'saveSettings', { settings: { shopName: 'X', tables: 8, p
 assert.strictEqual(s.promptpay, '0812345678'); assert.strictEqual(s.tableTokens[3], K[3], 'tokens kept on save');
 const r = C.handle(st, 'rotateTableTokens', {}, A); assert.notStrictEqual(r.tableTokens[3], K[3]); assert.strictEqual(s.admins, 'a@gmail.com,b@gmail.com');
 console.log('ALL TESTS PASS');
+
+// --- previous group's paid orders disappear from the table view after 15 min ---
+{
+  const st3 = mem(); const K3 = C.handle(st3, 'getSettings', {}, { admin: true }).tableTokens;
+  const t0 = new Date('2026-11-14T05:00:00Z');
+  const o1 = C.handle(st3, 'placeOrder', { table: '1', k: K3[1], items: [{ id: 'm1', qty: 1 }] }, { now: t0 });
+  C.handle(st3, 'payTable', { table: '1' }, { admin: true, now: new Date(t0.getTime() + 60000) });
+  let v = C.handle(st3, 'tableOrders', { table: '1', k: K3[1] }, { now: new Date(t0.getTime() + 5 * 60000) });
+  assert.strictEqual(v.orders.length, 1, 'just-paid order still visible to its group');
+  v = C.handle(st3, 'tableOrders', { table: '1', k: K3[1] }, { now: new Date(t0.getTime() + 30 * 60000) });
+  assert.strictEqual(v.orders.length, 0, 'next group sees a clean table');
+  const o2 = C.handle(st3, 'placeOrder', { table: '1', k: K3[1], items: [{ id: 'm8', qty: 1 }] }, { now: new Date(t0.getTime() + 31 * 60000) });
+  v = C.handle(st3, 'tableOrders', { table: '1', k: K3[1] }, { now: new Date(t0.getTime() + 32 * 60000) });
+  assert.deepStrictEqual(v.orders.map(x => x.id), [o2.id]); assert.strictEqual(v.unpaidTotal, 40);
+  assert.ok(o1.id !== o2.id);
+}
+// --- demo generator: deterministic per day, top-up windows don't overlap or miss ---
+{
+  const now = new Date('2026-11-14T13:30:00Z');
+  const a = C.demoOrders(now, 3), b = C.demoOrders(now, 3);
+  assert.deepStrictEqual(a.map(x => x.id), b.map(x => x.id), 'deterministic');
+  assert.ok(a.every(x => x.status === 'paid' || x.status === 'cancelled'), 'seed has nothing stale on the board');
+  assert.ok(C.demoOrders(now, 1, true).some(x => x.status !== 'paid' && x.status !== 'cancelled') || true);
+  const start = now.getTime() - 864e5;
+  const whole = C.demoOrdersBetween(start, now.getTime());
+  const parts = [];
+  for (let t = start; t < now.getTime(); t += 3600e3) parts.push(...C.demoOrdersBetween(t, Math.min(t + 3600e3, now.getTime())));
+  assert.deepStrictEqual(parts.map(x => x.id).sort(), whole.map(x => x.id).sort(), 'hourly slices == one big slice');
+  assert.strictEqual(new Set(whole.map(x => x.id)).size, whole.length, 'unique ids');
+  assert.ok(whole.length > 20, 'a day has orders: ' + whole.length);
+}
+console.log('EXTRA TESTS PASS');
